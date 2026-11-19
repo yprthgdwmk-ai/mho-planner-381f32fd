@@ -49,6 +49,18 @@
     misc: '<svg viewBox="0 0 16 16" fill="currentColor"><rect x="3.2" y="3.2" width="9.6" height="9.6" rx="1.4"/></svg>',
   };
 
+  const CAT_LABEL = { atk: '攻擊向', crit: '會心向', fire: '火屬性', water: '水屬性', thunder: '雷屬性', ice: '冰屬性', dragon: '龍屬性', def: '防禦向', hp: '體力／回復', res: '達人／生活', misc: '其他' };
+  const CAT_ORDER = ['atk', 'crit', 'fire', 'water', 'thunder', 'ice', 'dragon', 'def', 'hp', 'res', 'misc'];
+
+  function skillDesc(name) {
+    const info = SKILL_BY[name];
+    if (!info) return '';
+    if (info.effect && String(info.effect).trim()) return String(info.effect).trim();
+    if (info.levels && info.levels.length === 1 && info.levels[0].text) return info.levels[0].text;
+    if (info.levels && info.levels[0] && info.levels[0].text) return '效果依等級而異。（Lv1：' + info.levels[0].text + '）';
+    return '';
+  }
+
   const state = {
     tab: 'build',
     weaponType: '',
@@ -408,11 +420,15 @@
       <div class="page" data-page="build">
         <div class="step">
           <div class="sec-h"><span class="step-n">1</span>預定技能</div>
-          ${state.searchTargets.map((t, i) => `
-            <div class="goal">
+          ${state.searchTargets.map((t, i) => {
+            const desc = skillDesc(t.name);
+            const lvFx = skillLevelText(t.name, t.level);
+            const miss = !desc && !lvFx;
+            return `<div class="goal sel-skill">
               <div class="goal-top">
                 ${icon(catOf(t.name))}
                 <span class="skill-name">${escape(t.name)}</span>
+                <span class="sel-lvchip">Lv${t.level}</span>
                 <div class="stepper">
                   <button data-act="tgt-dec" data-i="${i}">−</button>
                   <span style="min-width:1.6em;text-align:center;font-weight:700">${t.level}</span>
@@ -421,8 +437,12 @@
                 <button class="clear-btn" data-act="tgt-del" data-i="${i}">刪</button>
               </div>
               <div style="margin:4px 0 0 30px">${targetPips(t.name, t.level)}</div>
+              ${desc ? `<div class="sel-desc">${escape(desc)}</div>` : ''}
+              ${lvFx ? `<div class="sel-lvfx">目標 Lv${t.level}：${escape(lvFx)}</div>` : ''}
+              ${miss ? `<div class="sel-desc">此技能的詳細效果文案尚未收入公開資料。</div>` : ''}
               ${goalStatus(tot, t)}
-            </div>`).join('')}
+            </div>`;
+          }).join('')}
           <button class="btn ghost" data-act="pick" data-kind="skill">＋ 新增技能</button>
           ${state.searchTargets.length ? '' : '<div class="empty-hint">先選要湊的技能和目標等級，再按「自動找配裝」。不必先選武器。</div>'}
 
@@ -637,19 +657,57 @@
         </button>`;
       }).join('')}</div>`;
     } else if (p.kind === 'skill') {
-      title = '新增想要的技能';
+      title = '選擇預定技能';
       const q = (p.q || '').trim();
-      const have = new Set(state.searchTargets.map((t) => t.name));
-      let list = D.skills.filter((s) => s.maxLevel).sort((a, b) => a.name.localeCompare(b.name, 'zh-Hant'));
-      if (q) list = list.filter((s) => (s.name + (s.effect || '')).includes(q));
+      const searching = q.length > 0;
+      const selected = new Map(state.searchTargets.map((t) => [t.name, t.level]));
+      let list = D.skills.slice().sort((a, b) => a.name.localeCompare(b.name, 'zh-Hant'));
+      if (q) list = list.filter((s) => s.name.includes(q));
+      function expandOf(sk) {
+        const cap = sk.maxLevel;
+        const cur = selected.get(sk.name);
+        const desc = skillDesc(sk.name);
+        const lvFx = cur ? skillLevelText(sk.name, cur) : null;
+        return `<div class="sk-expand" data-act="sheet">
+          <div class="sk-expand-h">${escape(sk.name)}　${cap != null ? '最高 Lv' + cap : '上限未公開'}</div>
+          ${desc ? `<div class="desc">${escape(desc)}</div>` : (!lvFx ? `<div class="desc">此技能的詳細效果文案尚未收入公開資料。</div>` : '')}
+          ${lvFx ? `<div class="desc">目標 Lv${cur}：${escape(lvFx)}</div>` : ''}
+          <div class="expand-row">
+            <div class="stepper">
+              <button data-act="tgt-dec" data-name="${escape(sk.name)}">−</button>
+              <span style="min-width:1.6em;text-align:center;font-weight:700">${cur || 0}</span>
+              <button data-act="tgt-inc" data-name="${escape(sk.name)}">+</button>
+            </div>
+            ${cur ? `<button class="clear-btn" data-act="tgt-del" data-name="${escape(sk.name)}">移除</button>` : '<span class="muted">按 ＋ 加入此技能</span>'}
+          </div>
+        </div>`;
+      }
+      function chipsOf(arr) {
+        return arr.map((sk) => {
+          const cur = selected.get(sk.name);
+          const open = p.open === sk.name;
+          const label = searching ? escape(sk.name) : (cur ? `${escape(sk.name)} ${cur}` : escape(sk.name));
+          return `<button type="button" class="sk-chip${cur ? ' on' : ''}${open ? ' open' : ''}" data-act="skill-chip" data-name="${escape(sk.name)}">${label}</button>${open ? expandOf(sk) : ''}`;
+        }).join('');
+      }
+      let inner = '';
+      if (searching) {
+        inner = list.length ? chipsOf(list) : '<div class="empty-hint">沒有符合的技能名稱</div>';
+      } else {
+        const groups = {};
+        CAT_ORDER.forEach((c) => { groups[c] = []; });
+        for (const sk of list) {
+          const c = catOf(sk.name);
+          (groups[c] || (groups[c] = [])).push(sk);
+        }
+        for (const c of CAT_ORDER) {
+          if (!(groups[c] || []).length) continue;
+          inner += `<div class="sk-ghead">${CAT_LABEL[c] || c}</div>` + chipsOf(groups[c]);
+        }
+      }
       body = `
         <input class="search" placeholder="搜尋技能名稱" data-act="pq" value="${escape(p.q || '')}">
-        <div class="list">${list.map((s) => `
-          <button class="pick${have.has(s.name) ? ' on' : ''}" data-act="add-skill" data-name="${escape(s.name)}">
-            <div class="nm">${escape(s.name)}　最高 Lv${s.maxLevel}${have.has(s.name) ? '　已加入' : ''}</div>
-            <div class="sk">${escape(s.effect || '')}</div>
-          </button>`).join('')}
-        </div>`;
+        <div class="list"><div class="sk-wrap">${inner}</div></div>`;
     }
     return `<div class="overlay" data-act="close-pick"><div class="sheet" data-act="sheet">
       <div class="sheet-h"><b>${escape(title)}</b><button class="x" data-act="close-pick">×</button></div>
@@ -972,7 +1030,7 @@
     if (act === 'tab') { state.tab = t.dataset.tab; state.picker = null; render(); return; }
     if (act === 'wtype') { state.weaponType = t.dataset.type || ''; render(); return; }
     if (act === 'pick') {
-      state.picker = { kind: t.dataset.kind, part: t.dataset.part, index: t.dataset.index != null ? Number(t.dataset.index) : null, q: '', skillF: '' };
+      state.picker = { kind: t.dataset.kind, part: t.dataset.part, index: t.dataset.index != null ? Number(t.dataset.index) : null, q: '', skillF: '', open: null };
       render();
       const inp = refetchSearchFocus();
       if (inp) inp.focus();
@@ -1006,22 +1064,50 @@
       else state.insights.push(k);
       render(); return;
     }
-    if (act === 'add-skill') {
+    if (act === 'skill-chip') {
+      if (!state.picker) return;
       const name = t.dataset.name;
-      if (!state.searchTargets.some((x) => x.name === name)) {
-        const cap = (SKILL_BY[name] || {}).maxLevel || 1;
-        const def = Math.min(cap, cap <= 3 ? cap : Math.min(cap, 7));
-        // default to cap if small, else a reasonable mid? User wanted target levels - default to cap for 體力 (3) might be wrong for test. Default to cap is OK; user can stepper. For 體力 cap 3, default 3. Fine.
-        state.searchTargets.push({ name, level: cap });
+      state.picker.open = state.picker.open === name ? null : name;
+      render();
+      const inp = refetchSearchFocus();
+      if (inp && state.picker && state.picker.q) {
+        inp.focus();
+        const pos = inp.value.length;
+        inp.setSelectionRange(pos, pos);
       }
-      state.picker = null; render(); return;
+      const exp = document.querySelector('.sk-expand');
+      if (exp) exp.scrollIntoView({ block: 'nearest' });
+      return;
     }
-    if (act === 'tgt-del') { state.searchTargets.splice(Number(t.dataset.i), 1); render(); return; }
+    if (act === 'tgt-del') {
+      const name = t.dataset.name;
+      if (name) {
+        const i = state.searchTargets.findIndex((x) => x.name === name);
+        if (i >= 0) state.searchTargets.splice(i, 1);
+      } else {
+        state.searchTargets.splice(Number(t.dataset.i), 1);
+      }
+      render();
+      const inp = refetchSearchFocus();
+      if (inp && state.picker && state.picker.q) { inp.focus(); inp.setSelectionRange(inp.value.length, inp.value.length); }
+      return;
+    }
     if (act === 'tgt-inc' || act === 'tgt-dec') {
-      const rec = state.searchTargets[Number(t.dataset.i)];
-      const cap = (SKILL_BY[rec.name] || {}).maxLevel || 99;
-      rec.level = act === 'tgt-inc' ? Math.min(cap, rec.level + 1) : Math.max(1, rec.level - 1);
-      render(); return;
+      const name = t.dataset.name;
+      let rec = name ? state.searchTargets.find((x) => x.name === name) : state.searchTargets[Number(t.dataset.i)];
+      if (act === 'tgt-inc' && name && !rec) {
+        rec = { name, level: 0 };
+        state.searchTargets.push(rec);
+      }
+      if (!rec) return;
+      const cap = (SKILL_BY[rec.name] || {}).maxLevel || 11;
+      if (act === 'tgt-inc') rec.level = Math.min(cap, (rec.level || 0) + 1);
+      else rec.level = Math.max(0, rec.level - 1);
+      if (rec.level <= 0) state.searchTargets = state.searchTargets.filter((x) => x !== rec);
+      render();
+      const inp = refetchSearchFocus();
+      if (inp && state.picker && state.picker.q) { inp.focus(); inp.setSelectionRange(inp.value.length, inp.value.length); }
+      return;
     }
     if (act === 'toggle-skill') {
       state.openSkill = state.openSkill === t.dataset.name ? null : t.dataset.name;
@@ -1160,6 +1246,11 @@
     ];
     state.adventurerId = '2';
     state.insightBudget = 30;
+    if (q.get('picker') === '1') {
+      state.picker = { kind: 'skill', q: q.get('q') || '', skillF: '', open: q.get('open') || null };
+      return true;
+    }
+    if (q.get('idle') === '1') return true;
     if (q.get('confirm') === '1') {
       state.confirmOpen = true;
       return true;
