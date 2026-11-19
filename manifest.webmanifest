@@ -3,7 +3,7 @@
   "short_name": "配裝器",
   "start_url": "./",
   "display": "standalone",
-  "background_color": "#3a2c22",
-  "theme_color": "#3a2c22",
+  "background_color": "#0b0a10",
+  "theme_color": "#0b0a10",
   "lang": "zh-Hant"
 }
