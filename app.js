@@ -22,6 +22,46 @@
     '火耐性強化', '水耐性強化', '冰耐性強化', '雷耐性強化', '龍耐性強化',
   ]);
 
+  // Weapon-specific or weapon-mechanic attack skills (GameWith official text).
+  // Hidden from the target picker only; still listed in result breakdowns.
+  const PICKER_HIDE = new Set([
+    '拔刀一閃',   // 武器拔刀攻擊後
+    '剛勢',       // 觸發剛猛後
+    '練氣纏刃',   // 練氣計量表（太刀）
+    '鬼人修羅',   // 鬼人化（雙劍）
+    '一擊洞穿',   // 貫通攻擊
+    '蓄勢強射',   // 遠程武器蓄力
+    '裝填強化',   // 裝填彈藥
+    '破擊',       // 使用大劍
+    '貫突',       // 使用長槍
+    '震懾',       // 使用打擊類武器
+    '弩彈強化',   // 弩槍彈藥
+    '變形強化',   // 武器變形
+    '弓招式強化', // 弓的招式
+    '彈道強化',   // 彈藥、箭矢
+  ]);
+
+  // General attack-oriented mains (not tied to one weapon). Target is always max level.
+  // GameWith has no skill named 氣力強化; 氣力轉化 is the official name.
+  const ATK_MAIN = new Set([
+    '氣力轉化', '連擊強化', '應對強化', '蓄力強化', '騰空',
+    '無瑕', '無懼', '痛點追擊', '窮追猛打',
+    '精神抖擻', '寓攻於守', '融光感應', '愛吃便當', '獵手直覺', '不屈',
+  ]);
+
+  function isAtkMain(name) { return ATK_MAIN.has(name); }
+  function atkMainCap(name) {
+    const cap = (SKILL_BY[name] || {}).maxLevel;
+    return cap != null ? cap : null;
+  }
+  function normalizeTargets() {
+    for (const t of state.searchTargets) {
+      if (!isAtkMain(t.name)) continue;
+      const cap = atkMainCap(t.name);
+      if (cap != null) t.level = cap;
+    }
+  }
+
   function catOf(name) {
     if (/火屬性|火耐性/.test(name)) return 'fire';
     if (/水屬性|水耐性|泥耐性/.test(name)) return 'water';
@@ -29,10 +69,11 @@
     if (/冰屬性|冰耐性/.test(name)) return 'ice';
     if (/龍屬性|龍耐性/.test(name)) return 'dragon';
     if (/體力|回復|血氣|超回復|復甦/.test(name)) return 'hp';
-    if (/看破|會心|弱點|潛能/.test(name)) return 'crit';
+    if (/看破|會心|弱點|潛能|鬥志/.test(name)) return 'crit';
     if (/加護|防護|防禦|耐性|風壓|震動|咆哮|屏障/.test(name)) return 'def';
-    if (/傷害|攻擊|連擊|應對|練氣|蓄力|拔刀|破擊|貫突|剛勢|氣力|裝填|騰空|窮追|痛點|鬥志|無瑕|無懼|威嚇/.test(name)) return 'atk';
-    if (/專家|獵人|採集|剝取|捕獲|標本|植物|地質|蜂蜜|節約|快吃|道具|攀爬/.test(name)) return 'res';
+    if (ATK_MAIN.has(name) || PICKER_HIDE.has(name)) return 'atk';
+    if (/傷害|攻擊|連擊|應對|練氣|蓄力|拔刀|破擊|貫突|剛勢|氣力|裝填|騰空|窮追|痛點|無瑕|無懼/.test(name)) return 'atk';
+    if (/專家|獵人|採集|剝取|捕獲|標本|植物|地質|蜂蜜|節約|快吃|道具|攀爬|威嚇/.test(name)) return 'res';
     return 'misc';
   }
   const ICONS = {
@@ -424,21 +465,23 @@
             const desc = skillDesc(t.name);
             const lvFx = skillLevelText(t.name, t.level);
             const miss = !desc && !lvFx;
+            const atk = isAtkMain(t.name);
+            const lvLabel = atk ? ('Lv最高 ' + t.level) : ('Lv' + t.level);
             return `<div class="goal sel-skill">
               <div class="goal-top">
                 ${icon(catOf(t.name))}
                 <span class="skill-name">${escape(t.name)}</span>
-                <span class="sel-lvchip">Lv${t.level}</span>
-                <div class="stepper">
-                  <button data-act="tgt-dec" data-i="${i}">−</button>
+                <span class="sel-lvchip">${lvLabel}</span>
+                ${atk ? '' : `<div class="stepper">
+                  <button type="button" data-act="tgt-dec" data-i="${i}">−</button>
                   <span style="min-width:1.6em;text-align:center;font-weight:700">${t.level}</span>
-                  <button data-act="tgt-inc" data-i="${i}">+</button>
-                </div>
-                <button class="clear-btn" data-act="tgt-del" data-i="${i}">刪</button>
+                  <button type="button" data-act="tgt-inc" data-i="${i}">+</button>
+                </div>`}
+                <button type="button" class="clear-btn" data-act="tgt-del" data-i="${i}">刪</button>
               </div>
               <div style="margin:4px 0 0 30px">${targetPips(t.name, t.level)}</div>
               ${desc ? `<div class="sel-desc">${escape(desc)}</div>` : ''}
-              ${lvFx ? `<div class="sel-lvfx">目標 Lv${t.level}：${escape(lvFx)}</div>` : ''}
+              ${lvFx ? `<div class="sel-lvfx">目標 ${atk ? '最高 ' : ''}Lv${t.level}：${escape(lvFx)}</div>` : ''}
               ${miss ? `<div class="sel-desc">此技能的詳細效果文案尚未收入公開資料。</div>` : ''}
               ${goalStatus(tot, t)}
             </div>`;
@@ -662,24 +705,29 @@
       const searching = q.length > 0;
       const selected = new Map(state.searchTargets.map((t) => [t.name, t.level]));
       let list = D.skills.slice().sort((a, b) => a.name.localeCompare(b.name, 'zh-Hant'));
+      list = list.filter((s) => !PICKER_HIDE.has(s.name));
       if (q) list = list.filter((s) => s.name.includes(q));
       function expandOf(sk) {
         const cap = sk.maxLevel;
         const cur = selected.get(sk.name);
         const desc = skillDesc(sk.name);
         const lvFx = cur ? skillLevelText(sk.name, cur) : null;
-        return `<div class="sk-expand" data-act="sheet">
-          <div class="sk-expand-h">${escape(sk.name)}　${cap != null ? '最高 Lv' + cap : '上限未公開'}</div>
-          ${desc ? `<div class="desc">${escape(desc)}</div>` : (!lvFx ? `<div class="desc">此技能的詳細效果文案尚未收入公開資料。</div>` : '')}
-          ${lvFx ? `<div class="desc">目標 Lv${cur}：${escape(lvFx)}</div>` : ''}
-          <div class="expand-row">
-            <div class="stepper">
-              <button data-act="tgt-dec" data-name="${escape(sk.name)}">−</button>
+        const atk = isAtkMain(sk.name);
+        const capLabel = cap != null ? (atk ? ('Lv最高 ' + cap) : ('最高 Lv' + cap)) : '上限未公開';
+        const controls = atk
+          ? `<span class="sk-fixed">${cap != null ? 'Lv最高 ' + cap : '上限未公開'}${cap != null ? '（固定）' : ''}</span>
+            ${cur ? `<button type="button" class="clear-btn" data-act="tgt-del" data-name="${escape(sk.name)}">移除</button>` : `<button type="button" class="btn ghost" data-act="tgt-inc" data-name="${escape(sk.name)}">加入</button>`}`
+          : `<div class="stepper">
+              <button type="button" data-act="tgt-dec" data-name="${escape(sk.name)}">−</button>
               <span style="min-width:1.6em;text-align:center;font-weight:700">${cur || 0}</span>
-              <button data-act="tgt-inc" data-name="${escape(sk.name)}">+</button>
+              <button type="button" data-act="tgt-inc" data-name="${escape(sk.name)}">+</button>
             </div>
-            ${cur ? `<button class="clear-btn" data-act="tgt-del" data-name="${escape(sk.name)}">移除</button>` : '<span class="muted">按 ＋ 加入此技能</span>'}
-          </div>
+            ${cur ? `<button type="button" class="clear-btn" data-act="tgt-del" data-name="${escape(sk.name)}">移除</button>` : '<span class="muted">按 ＋ 加入此技能</span>'}`;
+        return `<div class="sk-expand">
+          <div class="sk-expand-h">${escape(sk.name)}　${capLabel}</div>
+          ${desc ? `<div class="desc">${escape(desc)}</div>` : (!lvFx ? `<div class="desc">此技能的詳細效果文案尚未收入公開資料。</div>` : '')}
+          ${lvFx ? `<div class="desc">目標 ${atk ? '最高 ' : ''}Lv${cur}：${escape(lvFx)}</div>` : ''}
+          <div class="expand-row">${controls}</div>
         </div>`;
       }
       function chipsOf(arr) {
@@ -687,12 +735,18 @@
           const cur = selected.get(sk.name);
           const open = p.open === sk.name;
           const label = searching ? escape(sk.name) : (cur ? `${escape(sk.name)} ${cur}` : escape(sk.name));
-          return `<button type="button" class="sk-chip${cur ? ' on' : ''}${open ? ' open' : ''}" data-act="skill-chip" data-name="${escape(sk.name)}">${label}</button>${open ? expandOf(sk) : ''}`;
+          return `<button type="button" class="sk-chip${cur ? ' on' : ''}${open ? ' open' : ''}" data-act="skill-chip" data-name="${escape(sk.name)}">${label}</button>`;
         }).join('');
+      }
+      function expandIfOpen(arr) {
+        const sk = arr.find((s) => p.open === s.name);
+        return sk ? expandOf(sk) : '';
       }
       let inner = '';
       if (searching) {
-        inner = list.length ? chipsOf(list) : '<div class="empty-hint">沒有符合的技能名稱</div>';
+        inner = list.length
+          ? `<div class="sk-wrap">${chipsOf(list)}</div>${expandIfOpen(list)}`
+          : '<div class="empty-hint">沒有符合的技能名稱</div>';
       } else {
         const groups = {};
         CAT_ORDER.forEach((c) => { groups[c] = []; });
@@ -702,12 +756,12 @@
         }
         for (const c of CAT_ORDER) {
           if (!(groups[c] || []).length) continue;
-          inner += `<div class="sk-ghead">${CAT_LABEL[c] || c}</div>` + chipsOf(groups[c]);
+          inner += `<div class="sk-group"><div class="sk-ghead">${CAT_LABEL[c] || c}</div><div class="sk-wrap">${chipsOf(groups[c])}</div>${expandIfOpen(groups[c])}</div>`;
         }
       }
       body = `
         <input class="search" placeholder="搜尋技能名稱" data-act="pq" value="${escape(p.q || '')}">
-        <div class="list"><div class="sk-wrap">${inner}</div></div>`;
+        <div class="list">${inner}</div>`;
     }
     return `<div class="overlay" data-act="close-pick"><div class="sheet" data-act="sheet">
       <div class="sheet-h"><b>${escape(title)}</b><button class="x" data-act="close-pick">×</button></div>
@@ -716,6 +770,7 @@
   }
 
   function render() {
+    normalizeTargets();
     const root = document.getElementById('app');
     root.innerHTML = `
       <header class="topbar">
@@ -739,7 +794,7 @@
       <div class="confirm-list">${targets.length ? targets.map((t) => `
         <div class="confirm-row">
           <span>${icon(catOf(t.name))}${escape(t.name)}</span>
-          <b>Lv${t.level}</b>
+          <b>${isAtkMain(t.name) ? 'Lv最高 ' + t.level : 'Lv' + t.level}</b>
         </div>`).join('') : '<div class="empty-hint">尚未選擇技能。</div>'}</div>
       <div class="confirm-note">武器種類：${state.weaponType ? escape(state.weaponType) : '不限'}</div>
       <div class="btn-row confirm-actions">
@@ -1066,7 +1121,11 @@
     }
     if (act === 'skill-chip') {
       if (!state.picker) return;
-      const name = t.dataset.name;
+      const chip = e.target.closest('button.sk-chip');
+      if (!chip || chip !== t) return;
+      e.stopPropagation();
+      const name = chip.dataset.name;
+      if (!name) return;
       state.picker.open = state.picker.open === name ? null : name;
       render();
       const inp = refetchSearchFocus();
@@ -1100,10 +1159,16 @@
         state.searchTargets.push(rec);
       }
       if (!rec) return;
-      const cap = (SKILL_BY[rec.name] || {}).maxLevel || 11;
-      if (act === 'tgt-inc') rec.level = Math.min(cap, (rec.level || 0) + 1);
-      else rec.level = Math.max(0, rec.level - 1);
-      if (rec.level <= 0) state.searchTargets = state.searchTargets.filter((x) => x !== rec);
+      if (isAtkMain(rec.name)) {
+        const cap = atkMainCap(rec.name);
+        if (act === 'tgt-dec') return;
+        rec.level = cap != null ? cap : Math.max(rec.level || 1, 1);
+      } else {
+        const cap = (SKILL_BY[rec.name] || {}).maxLevel || 11;
+        if (act === 'tgt-inc') rec.level = Math.min(cap, (rec.level || 0) + 1);
+        else rec.level = Math.max(0, rec.level - 1);
+        if (rec.level <= 0) state.searchTargets = state.searchTargets.filter((x) => x !== rec);
+      }
       render();
       const inp = refetchSearchFocus();
       if (inp && state.picker && state.picker.q) { inp.focus(); inp.setSelectionRange(inp.value.length, inp.value.length); }
@@ -1115,6 +1180,7 @@
     }
     if (act === 'auto-build') {
       if (state.searchBusy) return;
+      normalizeTargets();
       if (!state.searchTargets.filter((x) => x.name && x.level > 0).length) {
         state.searchInfo = '請先選擇預定技能。';
         render();
@@ -1237,20 +1303,25 @@
   // Optional demo hook used for verification: ?demo=fire7hb2
   function maybeDemo() {
     const q = new URLSearchParams(location.search);
-    if (q.get('demo') !== 'fire7hb2') return false;
+    const demo = q.get('demo');
+    if (demo !== 'fire7hb2' && demo !== 'atkmain') return false;
     state.weaponType = '';
     state.weapon = null;
-    state.searchTargets = [
-      { name: '火屬性傷害提升', level: 7 },
-      { name: '體力強化', level: 2 },
-    ];
+    if (demo === 'atkmain') {
+      state.searchTargets = [{ name: '氣力轉化', level: 7 }];
+    } else {
+      state.searchTargets = [
+        { name: '火屬性傷害提升', level: 7 },
+        { name: '體力強化', level: 2 },
+      ];
+    }
     state.adventurerId = '2';
     state.insightBudget = 30;
     if (q.get('picker') === '1') {
       state.picker = { kind: 'skill', q: q.get('q') || '', skillF: '', open: q.get('open') || null };
       return true;
     }
-    if (q.get('idle') === '1') return true;
+    if (q.get('idle') === '1' || demo === 'atkmain') return true;
     if (q.get('confirm') === '1') {
       state.confirmOpen = true;
       return true;

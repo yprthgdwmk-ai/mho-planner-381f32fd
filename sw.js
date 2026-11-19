@@ -1,4 +1,4 @@
-const CACHE = 'mho-planner-v7';
+const CACHE = 'mho-planner-v8';
 const ASSETS = ['./', './index.html', './styles.css', './app.js', './data.js', './favicon.svg', './manifest.webmanifest'];
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(ASSETS)));
