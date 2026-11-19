@@ -229,3 +229,75 @@ input, select { font: inherit; color: inherit; }
 .empty-hint { color: var(--dim); text-align: center; padding: 24px 8px; font-size: 13px; }
 
 .note { font-size: 11px; color: var(--dim); line-height: 1.5; margin-top: 8px; }
+
+.step {
+  position: relative;
+  margin-bottom: 16px;
+  padding: 12px 12px 12px 14px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+}
+.step-n {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 22px; height: 22px; border-radius: 50%;
+  background: linear-gradient(180deg, #f0d78a, #c4922e);
+  color: #1a1408; font-size: 12px; font-weight: 800;
+  margin-right: 8px; vertical-align: middle;
+}
+.step .sec-h { display: inline-flex; align-items: center; gap: 6px; margin-bottom: 10px; }
+
+.goal {
+  background: #16141c; border: 1px solid var(--line);
+  border-radius: 10px; padding: 8px 10px; margin-bottom: 8px;
+}
+.goal-top { display: flex; align-items: center; gap: 8px; }
+.goal-top .skill-name { flex: 1; font-weight: 700; font-size: 14px; }
+.stepper { display: flex; align-items: center; gap: 4px; }
+.stepper button {
+  width: 28px; height: 28px; border-radius: 8px;
+  background: #2a2733; border: 1px solid var(--line);
+  font-size: 16px; font-weight: 700; color: var(--gold2);
+}
+.goal-status { font-size: 12px; margin-top: 6px; }
+.goal-status.ok { color: var(--ok); font-weight: 700; }
+.goal-status.short { color: var(--red); font-weight: 700; }
+
+.alts { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 4px; margin: 8px 0; }
+.alt {
+  flex: none; min-width: 132px; text-align: left;
+  background: #16141c; border: 1px solid var(--line);
+  border-radius: 10px; padding: 8px;
+  font-size: 12px;
+}
+.alt.on { border-color: var(--gold); background: #2a2316; }
+.alt b { display: block; color: var(--gold2); margin-bottom: 2px; }
+
+.stats {
+  background: linear-gradient(180deg, #1c1924, #15131c);
+  border: 1px solid #3a3546; border-radius: 14px; overflow: hidden;
+}
+.stat-row {
+  display: flex; justify-content: space-between; align-items: baseline;
+  gap: 8px; padding: 8px 12px; border-bottom: 1px solid #2a2733;
+  font-size: 14px;
+}
+.stat-row:nth-child(even) { background: rgba(255,255,255,.02); }
+.stat-row .k { color: var(--muted); }
+.stat-row .v { font-weight: 700; font-variant-numeric: tabular-nums; }
+.stat-row .s { font-size: 11px; color: var(--dim); margin-top: 2px; }
+.stat-head {
+  padding: 8px 12px 4px; font-size: 11px; letter-spacing: .14em;
+  color: var(--gold); font-weight: 700;
+}
+.substat {
+  display: grid; grid-template-columns: 1fr 72px; gap: 6px;
+  font-size: 12px; margin-top: 6px; color: var(--muted);
+}
+.substat input {
+  background: #0f0e14; border: 1px solid var(--line);
+  border-radius: 6px; padding: 4px 6px; width: 100%;
+}
+
+.goal-top { flex-wrap: nowrap; }
+.goal-top .skill-name { flex: 1; min-width: 0; }

@@ -5,6 +5,8 @@
   const PARTS = ['頭部', '胸部', '腕部', '腰部', '腿部'];
   const PART_SHORT = { '頭部': '頭', '胸部': '身', '腕部': '手', '腰部': '腰', '腿部': '腳' };
   const WEAPON_TYPES = ['太刀', '大劍', '雙劍', '長槍', '大錘', '充能斧', '重弩槍', '弓'];
+  const ELEMENTS = ['火', '水', '雷', '冰', '龍'];
+  const STATUSES = ['毒', '麻痺', '睡眠', '爆破'];
   const SKILL_BY = Object.fromEntries(D.skills.map((s) => [s.name, s]));
   const SET_BY = Object.fromEntries(D.setSkills.map((s) => [s.name, s]));
   const VSET_BY = Object.fromEntries(D.visageSets.map((s) => [s.name, s]));
@@ -12,8 +14,13 @@
   const WEP_BY = Object.fromEntries(D.weapons.map((w) => [w.slug, w]));
   const VIS_BY = Object.fromEntries(D.visages.map((v) => [v.id, v]));
   const ADV_BY = Object.fromEntries(D.adventurers.map((a) => [a.id, a]));
-  const STORE = 'mho-planner-v1';
+  const STORE = 'mho-planner-v2';
   const VISAGE_CAP = D.notes.visageCostCap || 12;
+  const ALWAYS_STAT = new Set([
+    '體力強化', '防護', '看破',
+    '火屬性傷害提升', '水屬性傷害提升', '冰屬性傷害提升', '雷屬性傷害提升', '龍屬性傷害提升',
+    '火耐性強化', '水耐性強化', '冰耐性強化', '雷耐性強化', '龍耐性強化',
+  ]);
 
   function catOf(name) {
     if (/火屬性|火耐性/.test(name)) return 'fire';
@@ -47,41 +54,40 @@
     weaponType: '太刀',
     weapon: null,
     armor: { 頭部: null, 胸部: null, 腕部: null, 腰部: null, 腿部: null },
-    visages: [], // {id, core}
+    visages: [],
+    visSubs: {},
+    showSubs: {},
     adventurerId: '2',
     insightBudget: 30,
     insights: [],
     picker: null,
     openSkill: null,
-    searchTargets: [
-      { name: '火屬性傷害提升', level: 7 },
-      { name: '體力強化', level: 3 },
-    ],
-    searchResults: null,
+    searchTargets: [],
+    altResults: [],
+    altIndex: -1,
     searchBusy: false,
+    searchInfo: '',
     saves: loadSaves(),
     compare: [null, null],
     saveName: '',
-    toast: '',
   };
 
   function loadSaves() {
     try { return JSON.parse(localStorage.getItem(STORE) || '[]'); }
     catch { return []; }
   }
-  function persistSaves() {
-    localStorage.setItem(STORE, JSON.stringify(state.saves));
-  }
+  function persistSaves() { localStorage.setItem(STORE, JSON.stringify(state.saves)); }
 
   function snapshot() {
     return {
-      weaponType: state.weaponType,
-      weapon: state.weapon,
+      weaponType: state.weaponType, weapon: state.weapon,
       armor: { ...state.armor },
       visages: state.visages.map((v) => ({ ...v })),
+      visSubs: { ...state.visSubs },
       adventurerId: state.adventurerId,
       insightBudget: state.insightBudget,
       insights: [...state.insights],
+      searchTargets: state.searchTargets.map((t) => ({ ...t })),
     };
   }
   function applySnap(s) {
@@ -90,15 +96,30 @@
     state.weapon = s.weapon || null;
     state.armor = { 頭部: null, 胸部: null, 腕部: null, 腰部: null, 腿部: null, ...(s.armor || {}) };
     state.visages = s.visages || [];
+    state.visSubs = s.visSubs || {};
     state.adventurerId = s.adventurerId || '2';
     state.insightBudget = s.insightBudget ?? 30;
     state.insights = s.insights || [];
+    if (s.searchTargets) state.searchTargets = s.searchTargets;
+  }
+  function rarityClass(n) { return 'rarity r' + Math.max(1, Math.min(11, n || 1)); }
+  function icon(cat) { return `<span class="icon cat-${cat}">${ICONS[cat] || ICONS.misc}</span>`; }
+  function escape(s) {
+    return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+  function fmt(n, digits) {
+    if (n == null || Number.isNaN(n)) return '—';
+    const x = Number(n);
+    return Number.isInteger(x) ? String(x) : x.toFixed(digits == null ? 1 : digits);
   }
 
-  function rarityClass(n) { return 'rarity r' + Math.max(1, Math.min(11, n || 1)); }
-
-  function icon(cat) {
-    return `<span class="icon cat-${cat}">${ICONS[cat] || ICONS.misc}</span>`;
+  function skillLevelText(name, level) {
+    const s = SKILL_BY[name];
+    if (!s || !s.levels || !level) return null;
+    const cap = s.maxLevel;
+    const lv = cap != null ? Math.min(level, cap) : level;
+    const row = s.levels.find((l) => l.level === lv);
+    return row ? row.text : null;
   }
 
   /* ---------- totals ---------- */
@@ -112,8 +133,7 @@
     }
     const setCount = new Map();
     for (const part of PARTS) {
-      const id = b.armor[part];
-      const a = id && ARMOR_BY[id];
+      const a = b.armor[part] && ARMOR_BY[b.armor[part]];
       if (!a) continue;
       for (const sk of a.skills) add(sk.name, sk.level, a.name, 'armor');
       if (a.setSkill) setCount.set(a.setSkill, (setCount.get(a.setSkill) || 0) + 1);
@@ -143,11 +163,10 @@
       const effective = cap != null ? Math.min(total, cap) : total;
       const over = cap != null && total > cap;
       const maxed = cap != null && total >= cap;
-      return { name, total, cap, effective, over, maxed, sources, effect: info.effect, cat: catOf(name), capUnknown: cap == null };
+      return { name, total, cap, effective, over, maxed, sources, effect: info.effect, cat: catOf(name), capUnknown: cap == null, text: skillLevelText(name, effective) };
     });
     skills.sort((a, b) => (b.over - a.over) || (b.maxed - a.maxed) || b.total - a.total || a.name.localeCompare(b.name, 'zh-Hant'));
 
-    // visages
     const visCost = (b.visages || []).reduce((s, v) => s + ((VIS_BY[v.id] && VIS_BY[v.id].cost) || 0), 0);
     const visSetCnt = new Map();
     const visFx = [];
@@ -164,7 +183,6 @@
       visSets.push({ name, count: cnt, effects: def && def.effects || [], active: fx });
       for (const e of fx) visFx.push({ title: `${name}（${e.pieces} 件）`, text: e.text, kind: 'vset' });
     }
-
     const adv = ADV_BY[b.adventurerId];
     const insightUsed = (b.insights || []).reduce((s, key) => {
       const it = adv && adv.insights.find((x) => x.key === key);
@@ -175,29 +193,144 @@
       return it ? { title: it.name, points: it.points, text: it.effect || '（此心得的詳細效果文案尚未收入）', kind: 'insight' } : null;
     }).filter(Boolean);
 
-    return { skills, setActive, setProgress, visCost, visSets, visFx, insightUsed, insightFx, weapon: w, defense: PARTS.reduce((s, p) => s + ((ARMOR_BY[b.armor[p]] || {}).defense || 0), 0) };
+    return { skills, setActive, setProgress, visCost, visSets, visFx, insightUsed, insightFx, weapon: w, defense: PARTS.reduce((s, p) => s + ((ARMOR_BY[b.armor[p]] || {}).defense || 0), 0), build: b };
   }
 
-  /* ---------- render helpers ---------- */
-  function el(html) {
-    const t = document.createElement('template');
-    t.innerHTML = html.trim();
-    return t.content;
+  function currentOf(tot, name) {
+    const s = tot.skills.find((x) => x.name === name);
+    return s ? s.total : 0;
   }
-  function escape(s) {
-    return String(s == null ? '' : s)
-      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+
+  /* ---------- combat stats ---------- */
+  function combatStats(tot) {
+    const b = tot.build || state;
+    const w = tot.weapon;
+    const notes = [];
+    const cond = [];
+    const alwaysFx = [];
+    const sources = { atk: [], aff: [], def: [], hp: [], elem: {}, dmg: [], res: {} };
+    ELEMENTS.forEach((e) => { sources.elem[e] = []; });
+
+    let atk = 0, aff = 0, def = tot.defense || 0, hpBonus = 0;
+    const elemAtk = { 火: 0, 水: 0, 雷: 0, 冰: 0, 龍: 0 };
+    const elemPct = { 火: 0, 水: 0, 雷: 0, 冰: 0, 龍: 0 };
+    const res = { 火: 0, 水: 0, 雷: 0, 冰: 0, 龍: 0 };
+    let status = null;
+    let dmgPct = 0;
+
+    if (w) {
+      atk += w.attack || 0;
+      sources.atk.push(`武器 ${w.name} ${w.attack}`);
+      if (w.critRate) { aff += w.critRate; sources.aff.push(`武器 ${fmt(w.critRate)}%`); }
+      if (ELEMENTS.includes(w.element) && w.elementValue) {
+        elemAtk[w.element] += w.elementValue;
+        sources.elem[w.element].push(`武器 ${w.elementValue}`);
+      } else if (STATUSES.includes(w.element) && w.elementValue) {
+        status = { name: w.element, value: w.elementValue, source: w.name };
+      }
+    } else {
+      notes.push('尚未選擇武器，攻擊力、會心率與屬性攻擊沒有武器基礎值。');
+    }
+    if (tot.defense) sources.def.push(`五件防具合計 ${tot.defense}（最高稀有度）`);
+    else notes.push('尚未裝備防具，沒有裝備防禦力。');
+
+    for (const sk of tot.skills) {
+      const text = sk.text;
+      if (!text) continue;
+      if (ALWAYS_STAT.has(sk.name)) {
+        const hp = text.match(/^體力\+(\d+)/);
+        if (hp) { hpBonus += +hp[1]; sources.hp.push(`${sk.name} Lv${sk.effective} +${hp[1]}`); }
+        const defm = text.match(/防禦力\+(\d+)/);
+        if (defm && !/技能發動|狂暴|耗盡/.test(text)) { def += +defm[1]; sources.def.push(`${sk.name} Lv${sk.effective} +${defm[1]}`); }
+        const affm = text.match(/會心率\+(\d+(?:\.\d+)?)%/);
+        if (affm && !/技能發動|弱點|發怒|狂暴|狩獵開始/.test(text)) { aff += +affm[1]; sources.aff.push(`${sk.name} Lv${sk.effective} +${affm[1]}%`); }
+        const ea = text.match(/(火|水|雷|冰|龍)屬性攻擊力\+(\d+)/);
+        if (ea) { elemAtk[ea[1]] += +ea[2]; sources.elem[ea[1]].push(`${sk.name} Lv${sk.effective} +${ea[2]}`); }
+        const ep = text.match(/(火|水|雷|冰|龍)屬性傷害\+(\d+)%/);
+        if (ep) { elemPct[ep[1]] += +ep[2]; }
+        const rad = text.match(/挑戰融光種魔物時變為(\d+)%/);
+        if (rad && ep) cond.push({ title: `${sk.name} Lv${sk.effective}（融光種）`, text: `${ep[1]}屬性傷害 +${rad[1]}%` });
+        const r = text.match(/(火|水|雷|冰|龍)耐性\+(\d+)/);
+        if (r) { res[r[1]] += +r[2]; }
+      } else {
+        cond.push({ title: `${sk.name} Lv${sk.effective}`, text });
+        // generic 屬性攻擊力+N on triggered skills is also conditional
+      }
+    }
+
+    // 繪影 published set / core
+    for (const fx of tot.visFx) {
+      const t = fx.text || '';
+      const alwaysSet = /^((?:火|水|雷|冰|龍)屬性傷害|物理傷害|會心率|奧義蓄能效率|屬性傷害)\+(\d+(?:\.\d+)?)%[^，。]*。?$/.test(t) && !/時|後|觸發|使用/.test(t);
+      const ep = t.match(/^(火|水|雷|冰|龍)屬性傷害\+(\d+(?:\.\d+)?)%/) ;
+      const affm = t.match(/^會心率\+(\d+(?:\.\d+)?)%/);
+      const phys = t.match(/^物理傷害\+(\d+(?:\.\d+)?)%/);
+      if (ep && !/時|後|觸發|使用/.test(t.split('。')[0])) {
+        elemPct[ep[1]] += +ep[2];
+        sources.elem[ep[1]].push(`${fx.title} 傷害 +${ep[2]}%`);
+      } else if (affm && !/時|後|觸發/.test(t.split('。')[0])) {
+        aff += +affm[1]; sources.aff.push(`${fx.title} +${affm[1]}%`);
+      } else if (phys && !/時|後|觸發/.test(t.split('。')[0])) {
+        dmgPct += +phys[1]; sources.dmg.push(`${fx.title} 物理傷害 +${phys[1]}%`);
+      } else if (/時|後|觸發|使用|冷卻|限S/.test(t)) {
+        cond.push({ title: fx.title, text: t });
+      } else {
+        alwaysFx.push({ title: fx.title, text: t });
+      }
+    }
+
+    // 心得 published
+    for (const fx of tot.insightFx) {
+      const t = fx.text || '';
+      const affm = t.match(/會心率提升(\d+(?:\.\d+)?)%/);
+      const dmg = t.match(/造成的傷害提升(\d+(?:\.\d+)?)%/);
+      const resall = t.match(/全屬性耐性提升(\d+(?:\.\d+)?)%/);
+      const defm = t.match(/防禦力\+(\d+)/);
+      if (dmg && !/時，|後，|發動時/.test(t)) { dmgPct += +dmg[1]; sources.dmg.push(`${fx.title} 傷害 +${dmg[1]}%`); }
+      else if (affm && !/時，|後，|發動時/.test(t)) { aff += +affm[1]; sources.aff.push(`${fx.title} +${affm[1]}%`); }
+      else if (defm && !/時，|後，|發動時/.test(t)) { def += +defm[1]; sources.def.push(`${fx.title} +${defm[1]}`); }
+      else if (/時，|後，|發動時|觸發|連續命中/.test(t)) cond.push({ title: fx.title, text: t });
+      else alwaysFx.push({ title: fx.title, text: t });
+    }
+
+    // user-typed 繪影 substats
+    let typed = false;
+    (b.visages || []).forEach((slot, i) => {
+      const sub = (b.visSubs || state.visSubs || {})[i] || {};
+      const addIf = (key, fn) => {
+        const v = sub[key];
+        if (v === '' || v == null || Number.isNaN(Number(v))) return;
+        typed = true; fn(Number(v));
+      };
+      addIf('attack', (n) => { atk += n; sources.atk.push(`繪影副屬性（自填）攻擊力 +${n}`); });
+      addIf('affinity', (n) => { aff += n; sources.aff.push(`繪影副屬性（自填）會心率 +${n}%`); });
+      addIf('defense', (n) => { def += n; sources.def.push(`繪影副屬性（自填）防禦力 +${n}`); });
+      addIf('hp', (n) => { hpBonus += n; sources.hp.push(`繪影副屬性（自填）體力 +${n}`); });
+      ELEMENTS.forEach((e) => addIf('elemAtk_' + e, (n) => { elemAtk[e] += n; sources.elem[e].push(`繪影副屬性（自填）${e}屬性攻擊 +${n}`); }));
+      ELEMENTS.forEach((e) => addIf('elemPct_' + e, (n) => { elemPct[e] += n; }));
+      addIf('physPct', (n) => { dmgPct += n; sources.dmg.push(`繪影副屬性（自填）物理傷害 +${n}%`); });
+    });
+    if ((b.visages || []).length && !typed) notes.push('已裝備繪影的副屬性是隨機數值，未填寫前不列入合計。');
+    notes.push('冒險者本身的基礎體力、基礎防禦與基礎攻擊未在公開資料中，上表只加總武器、防具與已公開的技能／套裝／繪影／心得效果。');
+    notes.push('傷害＋％不會換算進「攻擊力」數字，避免沒有公式就自行推算。');
+
+    return { atk, aff, def, hpBonus, elemAtk, elemPct, res, status, dmgPct, sources, cond, alwaysFx, notes, weapon: w };
   }
+
   function pips(skill) {
     const cap = skill.cap;
     if (cap == null) return '<span class="pips"></span>';
     const filled = Math.min(skill.total, cap);
-    const extra = skill.over ? Math.min(skill.total - cap, 3) : 0;
     let h = '<span class="pips" aria-hidden="true">';
     for (let i = 0; i < cap; i++) h += `<i class="pip${i < filled ? ' on' : ''}"></i>`;
-    // do not invent extra cap pips; overflow is shown by the number
-    h += '</span>';
-    return h;
+    return h + '</span>';
+  }
+  function targetPips(name, level) {
+    const cap = (SKILL_BY[name] || {}).maxLevel;
+    if (cap == null) return '';
+    let h = '<span class="pips" aria-hidden="true">';
+    for (let i = 0; i < cap; i++) h += `<i class="pip${i < level ? ' on' : ''}"></i>`;
+    return h + '</span>';
   }
   function lvText(skill) {
     if (skill.capUnknown) return `<span class="lv">Lv ${skill.total}</span>`;
@@ -211,8 +344,8 @@
     return `<div class="skill-panel">${tot.skills.map((s) => {
       const open = openKey === s.name;
       const br = open ? `<div class="breakdown">${s.sources.map((x) =>
-        `<div><span>${escape(x.source)}${x.kind === 'set' ? '' : ''}　<span class="muted">${x.kind === 'set' ? '套裝' : x.kind === 'weapon' ? '武器' : '防具'}</span></span><b>+${x.level}</b></div>`
-      ).join('')}${s.over ? `<div class="err">超過上限 ${s.cap}，多出的 ${s.total - s.cap} 點不會再加強效果</div>` : ''}${s.effect ? `<div class="d" style="margin-top:4px">${escape(s.effect)}</div>` : ''}</div>` : '';
+        `<div><span>${escape(x.source)}　<span class="muted">${x.kind === 'set' ? '套裝' : x.kind === 'weapon' ? '武器' : '防具'}</span></span><b>+${x.level}</b></div>`
+      ).join('')}${s.over ? `<div class="err">超過上限 ${s.cap}，多出的 ${s.total - s.cap} 點不會再加強效果</div>` : ''}${s.text ? `<div class="d" style="margin-top:4px">${escape(s.text)}</div>` : (s.effect ? `<div class="d" style="margin-top:4px">${escape(s.effect)}</div>` : '')}</div>` : '';
       return `<button class="skill-row${open ? ' open' : ''}" data-act="toggle-skill" data-name="${escape(s.name)}">
         ${icon(s.cat)}
         <span class="skill-name">${escape(s.name)}</span>
@@ -223,14 +356,58 @@
     }).join('')}</div>`;
   }
 
+  function goalStatus(tot, t) {
+    const cur = currentOf(tot, t.name);
+    const cap = (SKILL_BY[t.name] || {}).maxLevel;
+    const eff = cap != null ? Math.min(cur, cap) : cur;
+    if (cur >= t.level) {
+      const extra = cap != null && cur > cap ? `（總計 ${cur}，超出上限的 ${cur - cap} 點無效）` : (cur > t.level ? `（目前 ${cur}）` : '');
+      return `<div class="goal-status ok">✓ 已達成目標 ${t.level}${extra}</div>`;
+    }
+    return `<div class="goal-status short">還差 ${t.level - cur}（目前 ${cur}／目標 ${t.level}）</div>`;
+  }
+
+  function renderCombat(tot) {
+    const c = combatStats(tot);
+    const row = (k, v, s) => `<div class="stat-row"><div><div class="k">${k}</div>${s ? `<div class="s">${escape(s)}</div>` : ''}</div><div class="v">${v}</div></div>`;
+    const elemRows = ELEMENTS.map((e) => {
+      const at = c.elemAtk[e];
+      const pct = c.elemPct[e];
+      if (!at && !pct) return row(`${e}屬性攻擊`, '—', null);
+      const src = (c.sources.elem[e] || []).join('、');
+      return row(`${e}屬性攻擊`, `${fmt(at)}${pct ? `　傷害 +${fmt(pct)}%` : ''}`, src || null);
+    }).join('');
+    const resSrc = ELEMENTS.filter((e) => c.res[e]).map((e) => `${e} +${c.res[e]}`).join('　');
+    return `
+      <div class="stats">
+        <div class="stat-head">常駐數值</div>
+        ${row('攻擊力', fmt(c.atk), c.sources.atk.join('、') || null)}
+        ${row('會心率', fmt(c.aff) + '%', c.sources.aff.join('、') || '沒有會心率加成')}
+        ${elemRows}
+        ${c.status ? row('異常狀態・' + c.status.name, fmt(c.status.value), '來自武器（公開基礎值）') : row('異常狀態', '—', '武器沒有毒／麻痺／睡眠／爆破')}
+        ${c.dmgPct ? row('傷害加成（非屬性％）', '+' + fmt(c.dmgPct) + '%', c.sources.dmg.join('、')) : ''}
+        ${row('防禦力', fmt(c.def), c.sources.def.join('、') || null)}
+        ${row('體力加成', c.hpBonus ? '+' + fmt(c.hpBonus) : '—', (c.sources.hp.join('、') || '沒有體力強化') + '。基礎體力未公開，只列出技能／自填加成。')}
+        ${row('屬性耐性', resSrc || '—', '來自耐性強化技能的公開點數（與百分比耐性分開）')}
+        ${(c.alwaysFx && c.alwaysFx.length) ? `<div class="stat-head">其他常駐效果</div>` + c.alwaysFx.map((x) =>
+          `<div class="stat-row"><div><div class="k">${escape(x.title)}</div><div class="s">${escape(x.text)}</div></div><div class="v"></div></div>`
+        ).join('') : ''}
+        ${c.cond.length ? `<div class="stat-head">條件觸發</div>` + c.cond.map((x) =>
+          `<div class="stat-row"><div><div class="k">${escape(x.title)}</div><div class="s">${escape(x.text)}</div></div><div class="v"></div></div>`
+        ).join('') : ''}
+        <div class="stat-head">資料說明</div>
+        <div class="stat-row" style="display:block;font-size:11px;color:var(--dim);line-height:1.55">${c.notes.map((n) => escape(n)).join('<br>')}</div>
+      </div>`;
+  }
+
   function renderBuild() {
     const tot = compute();
     const w = tot.weapon;
     const adv = ADV_BY[state.adventurerId];
     return `
       <div class="page" data-page="build">
-        <div class="section">
-          <div class="sec-h">武器 <span class="sub">${w ? escape(w.typeLabel) : ''}</span></div>
+        <div class="step">
+          <div class="sec-h"><span class="step-n">1</span>選擇武器 <span class="sub">${w ? escape(w.typeLabel) : ''}</span></div>
           <div class="weapon-types">${WEAPON_TYPES.map((t) =>
             `<button class="chip${state.weaponType === t ? ' on' : ''}" data-act="wtype" data-type="${t}">${t}</button>`
           ).join('')}</div>
@@ -238,17 +415,49 @@
             <span class="part">武</span>
             <span class="meta">
               <div class="name${w ? '' : ' empty'}">${w ? escape(w.name) : '點此選擇武器'}</div>
-              <div class="tags">${w ? `攻擊 ${w.attack}${w.element ? '　' + w.element + ' ' + (w.elementValue || '') : ''}${w.sharpness ? '　鋒利度 ' + w.sharpness : ''}${w.skill ? '　' + w.skill.name + ' Lv' + w.skill.level : ''}` : '依武器種類篩選'}</div>
+              <div class="tags">${w ? `攻擊 ${w.attack}　會心 ${fmt(w.critRate)}%${w.element ? '　' + w.element + ' ' + (w.elementValue || '') : ''}${w.skill ? '　' + w.skill.name + ' Lv' + w.skill.level : ''}` : '依武器種類篩選'}</div>
             </span>
             ${w ? `<span class="${rarityClass(w.maxRarity)}">R${w.maxRarity}</span>` : ''}
           </button>
         </div>
 
-        <div class="section">
-          <div class="sec-h">防具 <span class="sub">防禦合計 ${tot.defense || '—'}</span></div>
+        <div class="step">
+          <div class="sec-h"><span class="step-n">2</span>想要的技能</div>
+          ${state.searchTargets.map((t, i) => `
+            <div class="goal">
+              <div class="goal-top">
+                ${icon(catOf(t.name))}
+                <span class="skill-name">${escape(t.name)}</span>
+                <div class="stepper">
+                  <button data-act="tgt-dec" data-i="${i}">−</button>
+                  <span style="min-width:1.6em;text-align:center;font-weight:700">${t.level}</span>
+                  <button data-act="tgt-inc" data-i="${i}">+</button>
+                </div>
+                <button class="clear-btn" data-act="tgt-del" data-i="${i}">刪</button>
+              </div>
+              <div style="margin:4px 0 0 30px">${targetPips(t.name, t.level)}</div>
+              ${goalStatus(tot, t)}
+            </div>`).join('')}
+          <button class="btn ghost" data-act="pick" data-kind="skill">＋ 新增技能</button>
+          ${state.searchTargets.length ? '' : '<div class="empty-hint">先選要湊的技能和目標等級，再去第 3 步按自動配裝。</div>'}
+        </div>
+
+        <div class="step">
+          <div class="sec-h"><span class="step-n">3</span>裝備、繪影與心得 <span class="sub">防禦合計 ${tot.defense || '—'}</span></div>
+          <div class="btn-row">
+            <button class="btn" data-act="auto-build">${state.searchBusy ? '搜尋中…' : '自動配裝'}</button>
+          </div>
+          ${state.searchInfo ? `<div class="muted" style="margin:6px 0">${escape(state.searchInfo)}</div>` : ''}
+          ${state.altResults.length ? `<div class="alts">${state.altResults.map((r, i) => `
+            <button class="alt${state.altIndex === i ? ' on' : ''}" data-act="alt" data-i="${i}">
+              <b>方案 ${i + 1}${r.shortfall ? '' : ' ✓'}</b>
+              ${r.labels.join('　')}${r.shortfall ? `<div class="err">還差 ${r.shortfall} 點</div>` : ''}
+              ${r.waste ? `<div class="err">溢出 ${r.waste}</div>` : ''}
+            </button>`).join('')}</div>` : ''}
+
           ${PARTS.map((p) => {
             const a = state.armor[p] && ARMOR_BY[state.armor[p]];
-            const tags = a ? a.skills.map((s) => `${s.name} Lv${s.level}`).join('　') + (a.setSkill ? '　套裝：' + a.setSkill : '') : '點此選擇';
+            const tags = a ? a.skills.map((s) => `${s.name} Lv${s.level}`).join('　') + (a.setSkill ? '　套裝：' + a.setSkill : '') : '點此選擇或先按自動配裝';
             return `<button class="slot" data-act="pick" data-kind="armor" data-part="${p}">
               <span class="part">${PART_SHORT[p]}</span>
               <span class="meta">
@@ -258,29 +467,46 @@
               ${a ? `<span class="${rarityClass(a.maxRarity)}">R${a.maxRarity}</span>` : ''}
             </button>`;
           }).join('')}
-        </div>
 
-        <div class="section">
-          <div class="sec-h">繪影 <span class="sub costbar${tot.visCost > VISAGE_CAP ? ' over' : ''}">消耗 ${tot.visCost}/${VISAGE_CAP}</span></div>
+          <div class="sec-h" style="margin-top:12px">繪影 <span class="sub costbar${tot.visCost > VISAGE_CAP ? ' over' : ''}">消耗 ${tot.visCost}/${VISAGE_CAP}</span></div>
           ${state.visages.map((slot, i) => {
             const v = VIS_BY[slot.id];
             if (!v) return '';
-            return `<button class="slot" data-act="pick" data-kind="visage" data-index="${i}">
-              <span class="part">${slot.core ? '核' : '影'}</span>
-              <span class="meta">
-                <div class="name">${escape(v.name)}</div>
-                <div class="tags">消耗 ${v.cost}　${(v.sets || []).join('、')}${slot.core && v.main ? '　核心效果已發動' : slot.core ? '' : '　非核心欄（核心效果不發動）'}</div>
-              </span>
-            </button>`;
+            const sub = state.visSubs[i] || {};
+            const field = (key, label) => `<label>${label}<input type="number" step="any" data-act="substat" data-i="${i}" data-key="${key}" value="${sub[key] == null ? '' : escape(sub[key])}"></label>`;
+            return `<div class="card">
+              <button class="slot" style="margin:0;border:0;background:transparent;padding:0" data-act="pick" data-kind="visage" data-index="${i}">
+                <span class="part">${slot.core ? '核' : '影'}</span>
+                <span class="meta">
+                  <div class="name">${escape(v.name)}</div>
+                  <div class="tags">消耗 ${v.cost}　${(v.sets || []).join('、')}${slot.core && v.main ? '　核心效果已發動' : '　點此更換'}</div>
+                </span>
+              </button>
+              <button class="btn ghost" style="margin-top:8px;width:100%" data-act="toggle-subs" data-i="${i}">${state.showSubs[i] ? '收合副屬性' : '填寫副屬性（自填才列入合計）'}</button>
+              ${state.showSubs[i] ? `<div class="muted" style="margin-top:6px">隨機副屬性沒有公開固定值，這裡只加你輸入的數字。</div>
+              <div class="substat">
+                ${field('attack', '攻擊力')}
+                ${field('affinity', '會心率％')}
+                ${field('defense', '防禦力')}
+                ${field('hp', '體力')}
+                ${field('elemAtk_火', '火屬性攻擊')}
+                ${field('elemPct_火', '火傷害％')}
+                ${field('elemAtk_水', '水屬性攻擊')}
+                ${field('elemPct_水', '水傷害％')}
+                ${field('elemAtk_雷', '雷屬性攻擊')}
+                ${field('elemPct_雷', '雷傷害％')}
+                ${field('elemAtk_冰', '冰屬性攻擊')}
+                ${field('elemPct_冰', '冰傷害％')}
+                ${field('elemAtk_龍', '龍屬性攻擊')}
+                ${field('elemPct_龍', '龍傷害％')}
+                ${field('physPct', '物理傷害％')}
+              </div>` : ''}
+            </div>`;
           }).join('')}
-          <div class="btn-row">
-            <button class="btn ghost" data-act="add-visage">新增繪影</button>
-          </div>
-          <div class="note">同一冒險者裝備的繪影消耗合計不能超過 ${VISAGE_CAP}。核心效果只有放在核心欄位才會發動。副屬性是隨機數值，這裡不填未查到的數字。</div>
-        </div>
+          <div class="btn-row"><button class="btn ghost" data-act="add-visage">新增繪影</button></div>
+          <div class="note">同一冒險者裝備的繪影消耗合計不能超過 ${VISAGE_CAP}。核心效果只有放在核心欄位才會發動。</div>
 
-        <div class="section">
-          <div class="sec-h">心得 <span class="sub costbar${tot.insightUsed > (state.insightBudget || 0) ? ' over' : ''}">成本 ${tot.insightUsed}/${state.insightBudget || 0}</span></div>
+          <div class="sec-h" style="margin-top:12px">心得 <span class="sub costbar${tot.insightUsed > (state.insightBudget || 0) ? ' over' : ''}">成本 ${tot.insightUsed}/${state.insightBudget || 0}</span></div>
           <div class="target">
             <select data-act="adventurer">${D.adventurers.map((a) =>
               `<option value="${escape(a.id)}" ${a.id === state.adventurerId ? 'selected' : ''}>${escape(a.name)}</option>`
@@ -295,6 +521,11 @@
               <div class="tags">${adv ? escape(adv.name) : ''}　點數由你轉換的心得道具決定，沒有固定上限</div>
             </span>
           </button>
+        </div>
+
+        <div class="section">
+          <div class="sec-h">戰鬥數值</div>
+          ${renderCombat(tot)}
         </div>
 
         <div class="section">
@@ -317,57 +548,11 @@
           <div class="fx-list">
             ${[...tot.visFx, ...tot.insightFx].length ? [...tot.visFx, ...tot.insightFx].map((f) =>
               `<div class="fx-item"><div class="t" style="font-weight:700;color:var(--gold2)">${escape(f.title)}${f.points ? '　成本 ' + f.points : ''}</div><div class="d">${escape(f.text)}</div></div>`
-            ).join('') : '<div class="empty-hint">尚未裝備繪影或心得。繪影套裝與心得效果會全部列在這裡。</div>'}
+            ).join('') : '<div class="empty-hint">尚未裝備繪影或心得。套裝與心得效果會全部列在這裡。</div>'}
           </div>
         </div>
         <div class="note">資料來源：${escape(D.source)}，技能為防具最高稀有度時的等級。資料抓取日期 ${escape(D.fetchedAt)}（台北時間）。</div>
       </div>`;
-  }
-
-  function renderSearch() {
-    const skillNames = D.skills.map((s) => s.name).sort((a, b) => a.localeCompare(b, 'zh-Hant'));
-    return `
-      <div class="page">
-        <div class="section">
-          <div class="sec-h">想湊的技能</div>
-          ${state.searchTargets.map((t, i) => `
-            <div class="target">
-              <select data-act="tgt-skill" data-i="${i}">${skillNames.map((n) =>
-                `<option ${n === t.name ? 'selected' : ''}>${escape(n)}</option>`
-              ).join('')}</select>
-              <input type="number" min="1" max="11" value="${t.level}" data-act="tgt-lv" data-i="${i}" style="width:64px">
-              <button class="clear-btn" data-act="tgt-del" data-i="${i}">刪</button>
-            </div>`).join('')}
-          <div class="btn-row">
-            <button class="btn ghost" data-act="tgt-add">新增技能</button>
-            <button class="btn" data-act="do-search">搜尋</button>
-          </div>
-          <div class="note">會把套裝加成算進去。搜尋的是防具組合；繪影不提供一般技能等級，結果裡會另外建議相關繪影套裝。</div>
-        </div>
-        <div class="section">
-          <div class="sec-h">結果 ${state.searchResults ? '　' + state.searchResults.length + ' 套' : ''}</div>
-          ${state.searchBusy ? '<div class="empty-hint">搜尋中…</div>' : renderSearchResults()}
-        </div>
-      </div>`;
-  }
-
-  function renderSearchResults() {
-    if (!state.searchResults) return '<div class="empty-hint">設定目標後按搜尋。</div>';
-    if (!state.searchResults.length) return '<div class="empty-hint">找不到符合的五件組合。可把目標等級調低再試。</div>';
-    return state.searchResults.map((r, i) => `
-      <div class="card">
-        <h3>組合 ${i + 1}${r.waste ? `　<span class="err">有溢出</span>` : ''}</h3>
-        ${PARTS.map((p) => {
-          const a = ARMOR_BY[r.armor[p]];
-          return `<div class="muted">${PART_SHORT[p]}　${a ? escape(a.name) : '—'}${a ? '　R' + a.maxRarity : ''}</div>`;
-        }).join('')}
-        <div style="margin-top:6px">${r.totals.map((s) =>
-          `<span class="chip${s.over ? '' : s.ok ? ' on' : ''}" style="display:inline-block;margin:2px 4px 0 0">${escape(s.name)} ${s.total}${s.cap ? '/' + s.cap : ''}${s.over ? ' 溢' : s.ok ? ' ✓' : ''}</span>`
-        ).join('')}</div>
-        ${r.sets.length ? `<div class="muted" style="margin-top:6px">套裝：${r.sets.map((s) => escape(s)).join('、')}</div>` : ''}
-        ${r.suggestedVisages.length ? `<div class="muted" style="margin-top:4px">建議繪影：${r.suggestedVisages.map((s) => escape(s)).join('、')}</div>` : ''}
-        <div class="btn-row" style="margin-top:8px"><button class="btn ghost" data-act="apply-result" data-i="${i}">套用到配裝</button></div>
-      </div>`).join('');
   }
 
   function renderSaves() {
@@ -408,19 +593,20 @@
 
   function renderCompare() {
     const [a, b] = state.compare;
-    if (!a && !b) return '<div class="empty-hint">在存檔列按「比較」，選兩套配裝並排看技能。</div>';
+    if (!a && !b) return '<div class="empty-hint">在存檔列按「比較」，選兩套配裝並排看技能與戰鬥數值。</div>';
     const A = a && compute(a.build);
     const B = b && compute(b.build);
     const names = new Set([...(A ? A.skills.map((s) => s.name) : []), ...(B ? B.skills.map((s) => s.name) : [])]);
     const all = [...names].sort((x, y) => x.localeCompare(y, 'zh-Hant'));
     function col(save, tot) {
       if (!save) return '<div class="muted">尚未選擇</div>';
+      const c = combatStats(tot);
       return `<div class="card"><h3>${escape(save.name)}</h3>
+        <div class="muted">攻擊 ${fmt(c.atk)}　會心 ${fmt(c.aff)}%　防禦 ${fmt(c.def)}</div>
         ${PARTS.map((p) => `<div class="muted">${PART_SHORT[p]} ${(ARMOR_BY[save.build.armor[p]] || {}).name || '—'}</div>`).join('')}
         <div style="margin-top:8px">${all.map((n) => {
           const s = tot.skills.find((x) => x.name === n);
-          const lv = s ? s.total : 0;
-          return `<div style="display:flex;justify-content:space-between;font-size:12px;padding:2px 0"><span>${escape(n)}</span><b>${lv || '—'}</b></div>`;
+          return `<div style="display:flex;justify-content:space-between;font-size:12px;padding:2px 0"><span>${escape(n)}</span><b>${s ? s.total : '—'}</b></div>`;
         }).join('')}</div></div>`;
     }
     return `<div class="compare">${col(a, A)}${col(b, B)}</div>`;
@@ -442,7 +628,7 @@
           <button class="pick" data-act="choose-weapon" data-slug=""><div class="nm">（不裝備）</div></button>
           ${list.map((w) => `<button class="pick${state.weapon === w.slug ? ' on' : ''}" data-act="choose-weapon" data-slug="${escape(w.slug)}">
             <div class="nm">${escape(w.name)} <span class="${rarityClass(w.maxRarity)}">R${w.maxRarity}</span></div>
-            <div class="sk">攻擊 ${w.attack}${w.element ? '　' + w.element + ' ' + (w.elementValue || '') : ''}${w.skill ? '　' + w.skill.name + ' Lv' + w.skill.level : ''}</div>
+            <div class="sk">攻擊 ${w.attack}　會心 ${fmt(w.critRate)}%${w.element ? '　' + w.element + ' ' + (w.elementValue || '') : ''}${w.skill ? '　' + w.skill.name + ' Lv' + w.skill.level : ''}</div>
           </button>`).join('')}
         </div>`;
     } else if (p.kind === 'armor') {
@@ -469,10 +655,7 @@
     } else if (p.kind === 'visage') {
       title = p.index == null ? '新增繪影' : '更換繪影';
       const q = (p.q || '').trim();
-      const usedCost = state.visages.reduce((s, v, i) => {
-        if (p.index != null && i === p.index) return s;
-        return s + ((VIS_BY[v.id] && VIS_BY[v.id].cost) || 0);
-      }, 0);
+      const usedCost = state.visages.reduce((s, v, i) => s + ((p.index != null && i === p.index) ? 0 : ((VIS_BY[v.id] && VIS_BY[v.id].cost) || 0)), 0);
       let list = D.visages;
       if (q) list = list.filter((v) => (v.name + (v.sets || []).join('') + (v.main || '')).includes(q));
       body = `
@@ -495,6 +678,20 @@
           <div class="sk">${escape(it.effect || '（詳細效果文案尚未收入）')}</div>
         </button>`;
       }).join('')}</div>`;
+    } else if (p.kind === 'skill') {
+      title = '新增想要的技能';
+      const q = (p.q || '').trim();
+      const have = new Set(state.searchTargets.map((t) => t.name));
+      let list = D.skills.filter((s) => s.maxLevel).sort((a, b) => a.name.localeCompare(b.name, 'zh-Hant'));
+      if (q) list = list.filter((s) => (s.name + (s.effect || '')).includes(q));
+      body = `
+        <input class="search" placeholder="搜尋技能名稱" data-act="pq" value="${escape(p.q || '')}">
+        <div class="list">${list.map((s) => `
+          <button class="pick${have.has(s.name) ? ' on' : ''}" data-act="add-skill" data-name="${escape(s.name)}">
+            <div class="nm">${escape(s.name)}　最高 Lv${s.maxLevel}${have.has(s.name) ? '　已加入' : ''}</div>
+            <div class="sk">${escape(s.effect || '')}</div>
+          </button>`).join('')}
+        </div>`;
     }
     return `<div class="overlay" data-act="close-pick"><div class="sheet" data-act="sheet">
       <div class="sheet-h"><b>${escape(title)}</b><button class="x" data-act="close-pick">×</button></div>
@@ -509,48 +706,14 @@
         <div class="brand"><h1>旅人配裝器</h1><small>魔物獵人：旅人</small></div>
         <nav class="tabs">
           <button class="tab${state.tab === 'build' ? ' on' : ''}" data-act="tab" data-tab="build">配裝</button>
-          <button class="tab${state.tab === 'search' ? ' on' : ''}" data-act="tab" data-tab="search">自動找配裝</button>
           <button class="tab${state.tab === 'saves' ? ' on' : ''}" data-act="tab" data-tab="saves">存檔</button>
         </nav>
       </header>
-      ${state.tab === 'build' ? renderBuild() : state.tab === 'search' ? renderSearch() : renderSaves()}
+      ${state.tab === 'saves' ? renderSaves() : renderBuild()}
       ${renderPicker()}`;
   }
 
-  /* ---------- search ---------- */
-  function suggestVisages(targets) {
-    const names = new Set(targets.map((t) => t.name));
-    const out = [];
-    if ([...names].some((n) => n.includes('火屬性傷害'))) out.push('影繪之灼焰（2 件：火屬性傷害+5%）');
-    if ([...names].some((n) => n.includes('水屬性傷害'))) out.push('影繪之水御（2 件：水屬性傷害+5%）');
-    if ([...names].some((n) => n.includes('冰屬性傷害'))) out.push('影繪之冰霜（2 件：冰屬性傷害+5%）');
-    if ([...names].some((n) => n.includes('雷屬性傷害'))) out.push('影繪之湧雷（2 件：雷屬性傷害+5%）');
-    if ([...names].some((n) => n.includes('龍屬性傷害'))) out.push('影繪之破龍（2 件：龍屬性傷害+5%）');
-    if ([...names].some((n) => /看破|會心/.test(n))) out.push('影繪之武技／影繪之共鳴（2 件：會心率+5%）');
-    return out;
-  }
-
-  function usefulArmor(targets) {
-    const want = new Map(targets.map((t) => [t.name, t.level]));
-    const usefulSets = new Set();
-    for (const st of D.setSkills) {
-      if (st.skill && want.has(st.skill)) usefulSets.add(st.name);
-    }
-    const byPart = {};
-    for (const p of PARTS) byPart[p] = [];
-    for (const a of D.armor) {
-      const hit = a.skills.some((s) => want.has(s.name)) || (a.setSkill && usefulSets.has(a.setSkill));
-      if (hit) byPart[a.partLabel].push(a);
-    }
-    // If a slot is empty of contributors, leave it empty (no piece) as only option
-    for (const p of PARTS) {
-      // score and cap to keep search interactive
-      byPart[p].sort((a, b) => scoreArmor(b, want) - scoreArmor(a, want));
-      if (byPart[p].length > 14) byPart[p] = byPart[p].slice(0, 14);
-      byPart[p].push(null); // allow empty
-    }
-    return byPart;
-  }
+  /* ---------- auto search ---------- */
   function scoreArmor(a, want) {
     let s = 0;
     for (const sk of a.skills) if (want.has(sk.name)) s += sk.level * 10;
@@ -559,73 +722,201 @@
     return s;
   }
 
+  function suggestedVisageSets(targets) {
+    const names = new Set(targets.map((t) => t.name));
+    const out = [];
+    if ([...names].some((n) => n.includes('火屬性傷害'))) out.push('影繪之灼焰');
+    if ([...names].some((n) => n.includes('水屬性傷害'))) out.push('影繪之水御');
+    if ([...names].some((n) => n.includes('冰屬性傷害'))) out.push('影繪之冰霜');
+    if ([...names].some((n) => n.includes('雷屬性傷害'))) out.push('影繪之湧雷');
+    if ([...names].some((n) => n.includes('龍屬性傷害'))) out.push('影繪之破龍');
+    if ([...names].some((n) => /看破|會心/.test(n))) out.push('影繪之武技');
+    return out;
+  }
+
+  function fillVisagesFor(targets) {
+    const sets = suggestedVisageSets(targets);
+    const picked = [];
+    let cost = 0;
+    const w = state.weapon && WEP_BY[state.weapon];
+    const elem = w && w.element;
+    function add(v, core) {
+      if (!v || picked.some((p) => p.id === v.id)) return false;
+      if (cost + v.cost > VISAGE_CAP) return false;
+      picked.push({ id: v.id, core: !!core });
+      cost += v.cost;
+      return true;
+    }
+    for (const setName of sets) {
+      const cands = D.visages.filter((v) => (v.sets || []).includes(setName));
+      const coreCand = elem && cands.find((v) => (v.main || '').includes('使用' + elem + '屬性武器'));
+      if (coreCand) add(coreCand, !picked.some((p) => p.core));
+      const cheap = cands.filter((v) => !coreCand || v.id !== coreCand.id).sort((a, b) => a.cost - b.cost);
+      for (const v of cheap) {
+        const n = picked.filter((p) => (VIS_BY[p.id].sets || []).includes(setName)).length;
+        if (n >= 2) break;
+        add(v, false);
+      }
+    }
+    if (picked.length && !picked.some((p) => p.core)) picked[0].core = true;
+    state.visages = picked;
+    state.visSubs = {};
+    state.showSubs = {};
+  }
+
+  function fillInsights() {
+    if (state.insights.length) return;
+    const adv = ADV_BY[state.adventurerId];
+    if (!adv) return;
+    let used = 0;
+    const budget = state.insightBudget || 0;
+    for (const name of ['戰意', '蓄勢', '護體', '和諧']) {
+      const it = adv.insights.find((x) => x.name === name);
+      if (it && used + it.points <= budget) { state.insights.push(it.key); used += it.points; }
+    }
+  }
+
   function runSearch() {
     const targets = state.searchTargets.filter((t) => t.name && t.level > 0);
-    if (!targets.length) { state.searchResults = []; return; }
-    const want = targets.map((t) => ({ name: t.name, level: t.level, cap: (SKILL_BY[t.name] || {}).maxLevel }));
-    const by = usefulArmor(targets);
-    const results = [];
-    const parts = PARTS;
-    const lists = parts.map((p) => by[p]);
-    const suggested = suggestVisages(targets);
+    if (!targets.length) {
+      state.altResults = [];
+      state.searchInfo = '請先在第 2 步選技能。';
+      return;
+    }
+    const wantNames = new Set(targets.map((t) => t.name));
+    const usefulSets = new Set(D.setSkills.filter((s) => s.skill && wantNames.has(s.skill)).map((s) => s.name));
+    const lists = PARTS.map((p) => {
+      const arr = D.armor.filter((a) => a.partLabel === p && (
+        a.skills.some((s) => wantNames.has(s.name)) || (a.setSkill && usefulSets.has(a.setSkill))
+      ));
+      arr.sort((a, b) => scoreArmor(b, wantNames) - scoreArmor(a, wantNames));
+      arr.push(null);
+      return arr;
+    });
 
-    function totalsFor(combo) {
-      const setCount = new Map();
-      const skill = new Map();
-      const names = {};
-      for (let i = 0; i < 5; i++) {
-        const a = combo[i];
-        if (!a) { names[parts[i]] = null; continue; }
-        names[parts[i]] = a.id;
-        for (const sk of a.skills) skill.set(sk.name, (skill.get(sk.name) || 0) + sk.level);
-        if (a.setSkill) setCount.set(a.setSkill, (setCount.get(a.setSkill) || 0) + 1);
+    const nT = targets.length;
+    const need = targets.map((t) => t.level);
+    const cap = targets.map((t) => {
+      const c = (SKILL_BY[t.name] || {}).maxLevel;
+      return c == null ? 99 : c;
+    });
+    function pack(a) {
+      const v = new Array(nT).fill(0);
+      if (!a) return { v, set: null, def: 0, id: null };
+      for (let i = 0; i < nT; i++) {
+        for (const sk of a.skills) if (sk.name === targets[i].name) v[i] += sk.level;
       }
-      const sets = [];
-      for (const [name, cnt] of setCount) {
-        const def = SET_BY[name];
-        if (def && cnt >= def.pieces) {
-          sets.push(name);
-          if (def.skill && def.delta) skill.set(def.skill, (skill.get(def.skill) || 0) + def.delta);
+      return { v, set: a.setSkill || null, def: a.defense || 0, id: a.id };
+    }
+    const packed = lists.map((list) => list.map(pack));
+    const setInfo = {};
+    for (const st of D.setSkills) {
+      const i = targets.findIndex((t) => t.name === st.skill);
+      if (i >= 0 && st.delta) setInfo[st.name] = { i, delta: st.delta, need: st.pieces };
+    }
+    const maxSlot = packed.map((list) => {
+      const m = new Array(nT).fill(0);
+      const sets = new Set();
+      for (const p of list) {
+        for (let i = 0; i < nT; i++) if (p.v[i] > m[i]) m[i] = p.v[i];
+        if (p.set && setInfo[p.set]) sets.add(p.set);
+      }
+      return { m, sets };
+    });
+
+    function canBound(from, cur, setCnt) {
+      for (let i = 0; i < nT; i++) {
+        let mx = cur[i];
+        for (let s = from; s < 5; s++) mx += maxSlot[s].m[i];
+        for (const [name, info] of Object.entries(setInfo)) {
+          if (info.i !== i) continue;
+          const have = setCnt[name] || 0;
+          if (have >= info.need) { mx += info.delta; continue; }
+          let poss = have;
+          for (let s = from; s < 5; s++) if (maxSlot[s].sets.has(name)) poss++;
+          if (poss >= info.need) mx += info.delta;
         }
+        if (mx < need[i]) return false;
       }
-      return { names, skill, sets };
+      return true;
     }
 
-    function ok(skill) {
-      return want.every((t) => (skill.get(t.name) || 0) >= t.level);
-    }
-    function score(skill) {
-      let s = 0, waste = 0;
-      for (const t of want) {
-        const v = skill.get(t.name) || 0;
-        const cap = t.cap;
-        if (cap != null && v > cap) waste += v - cap;
-        s += Math.min(v, cap || v) * 10;
+    const best = [];
+    const t0 = (typeof performance !== 'undefined' && performance.now()) || Date.now();
+    const LIMIT = 1200;
+    let visited = 0, timedOut = false;
+    const path = new Array(5);
+
+    function consider(cur, setCnt, def, empty) {
+      const tot = cur.slice();
+      const sets = [];
+      for (const [name, info] of Object.entries(setInfo)) {
+        if ((setCnt[name] || 0) >= info.need) { tot[info.i] += info.delta; sets.push(name); }
       }
-      return { s, waste };
+      let shortfall = 0, waste = 0;
+      const labels = [];
+      for (let i = 0; i < nT; i++) {
+        if (tot[i] < need[i]) shortfall += need[i] - tot[i];
+        if (tot[i] > cap[i]) waste += tot[i] - cap[i];
+        labels.push(targets[i].name.replace('屬性傷害提升', '').replace('強化', '') + tot[i]);
+      }
+      const rec = {
+        armor: {},
+        shortfall, waste, defense: def, empty, sets, labels,
+        score: shortfall * 10000 + waste * 100 - def + empty * 3,
+      };
+      PARTS.forEach((p, i) => { rec.armor[p] = path[i] && path[i].id; });
+      if (best.length < 8) { best.push(rec); best.sort((a, b) => a.score - b.score); }
+      else if (rec.score < best[best.length - 1].score) {
+        best[best.length - 1] = rec; best.sort((a, b) => a.score - b.score);
+      }
     }
 
-    // nested loops, lists already pruned
-    const [H, C, A, W, L] = lists;
-    for (const h of H) for (const c of C) for (const a of A) {
-      // partial prune: mid skills
-      for (const w of W) for (const l of L) {
-        const t = totalsFor([h, c, a, w, l]);
-        if (!ok(t.skill)) continue;
-        const sc = score(t.skill);
-        const shown = want.map((tg) => {
-          const v = t.skill.get(tg.name) || 0;
-          return { name: tg.name, total: v, cap: tg.cap, ok: v >= tg.level && (tg.cap == null || v <= tg.cap), over: tg.cap != null && v > tg.cap };
-        });
-        // also include other skills? keep result compact but when applied, full list shows
-        results.push({ armor: t.names, sets: t.sets, totals: shown, score: sc.s, waste: sc.waste, suggestedVisages: suggested });
+    function dfs(slot, cur, setCnt, def, empty) {
+      if (timedOut) return;
+      if ((++visited & 2047) === 0) {
+        const now = (typeof performance !== 'undefined' && performance.now()) || Date.now();
+        if (now - t0 > LIMIT) { timedOut = true; return; }
+      }
+      if (slot === 5) { consider(cur, setCnt, def, empty); return; }
+      if (!canBound(slot, cur, setCnt)) return;
+      const list = packed[slot];
+      for (let i = 0; i < list.length; i++) {
+        const p = list[i];
+        path[slot] = p;
+        const nxt = cur.slice();
+        for (let k = 0; k < nT; k++) nxt[k] += p.v[k];
+        const ns = Object.assign({}, setCnt);
+        if (p.set) ns[p.set] = (ns[p.set] || 0) + 1;
+        dfs(slot + 1, nxt, ns, def + p.def, empty + (p.id ? 0 : 1));
+        if (timedOut) return;
       }
     }
-    results.sort((a, b) => (a.waste - b.waste) || (b.score - a.score));
-    state.searchResults = results.slice(0, 20);
+
+    dfs(0, new Array(nT).fill(0), {}, 0, 0);
+    state.altResults = best;
+    const meet = best.filter((r) => r.shortfall === 0).length;
+    state.searchInfo = meet
+      ? `找到 ${meet} 套能達成目標的組合（顯示前 ${best.length} 套）${timedOut ? '，搜尋時間到後停止，已保留當下最佳。' : '。只搜尋對目標技能有貢獻的防具，並用分支界限剪掉不可能的組合。'}`
+      : (best.length ? `沒有完全達標的組合，已列出最接近的 ${best.length} 套。` : '找不到可用組合。');
+    if (best.length) applyAlt(0);
+  }
+
+  function applyAlt(i) {
+    const r = state.altResults[i];
+    if (!r) return;
+    state.altIndex = i;
+    state.armor = { ...r.armor };
+    fillVisagesFor(state.searchTargets);
+    fillInsights();
   }
 
   /* ---------- events ---------- */
+  function refetchSearchFocus() {
+    const inp = document.querySelector('.search');
+    return inp;
+  }
+
   function onClick(e) {
     const t = e.target.closest('[data-act]');
     if (!t) return;
@@ -636,15 +927,14 @@
     if (act === 'pick') {
       state.picker = { kind: t.dataset.kind, part: t.dataset.part, index: t.dataset.index != null ? Number(t.dataset.index) : null, q: '', skillF: '' };
       render();
-      const inp = document.querySelector('.search');
+      const inp = refetchSearchFocus();
       if (inp) inp.focus();
       return;
     }
     if (act === 'close-pick') { state.picker = null; render(); return; }
     if (act === 'choose-weapon') { state.weapon = t.dataset.slug || null; state.picker = null; render(); return; }
     if (act === 'choose-armor') {
-      const part = state.picker.part;
-      state.armor[part] = t.dataset.id || null;
+      state.armor[state.picker.part] = t.dataset.id || null;
       state.picker = null; render(); return;
     }
     if (act === 'add-visage') { state.picker = { kind: 'visage', index: null, q: '' }; render(); return; }
@@ -652,7 +942,7 @@
       const id = t.dataset.id;
       const idx = state.picker.index;
       if (!id) {
-        if (idx != null) state.visages.splice(idx, 1);
+        if (idx != null) { state.visages.splice(idx, 1); delete state.visSubs[idx]; }
       } else if (idx != null) {
         const keepCore = state.visages[idx] && state.visages[idx].core;
         state.visages[idx] = { id, core: keepCore || !state.visages.some((v) => v.core) };
@@ -669,91 +959,85 @@
       else state.insights.push(k);
       render(); return;
     }
+    if (act === 'add-skill') {
+      const name = t.dataset.name;
+      if (!state.searchTargets.some((x) => x.name === name)) {
+        const cap = (SKILL_BY[name] || {}).maxLevel || 1;
+        const def = Math.min(cap, cap <= 3 ? cap : Math.min(cap, 7));
+        // default to cap if small, else a reasonable mid? User wanted target levels - default to cap for 體力 (3) might be wrong for test. Default to cap is OK; user can stepper. For 體力 cap 3, default 3. Fine.
+        state.searchTargets.push({ name, level: cap });
+      }
+      state.picker = null; render(); return;
+    }
+    if (act === 'tgt-del') { state.searchTargets.splice(Number(t.dataset.i), 1); render(); return; }
+    if (act === 'tgt-inc' || act === 'tgt-dec') {
+      const rec = state.searchTargets[Number(t.dataset.i)];
+      const cap = (SKILL_BY[rec.name] || {}).maxLevel || 99;
+      rec.level = act === 'tgt-inc' ? Math.min(cap, rec.level + 1) : Math.max(1, rec.level - 1);
+      render(); return;
+    }
     if (act === 'toggle-skill') {
       state.openSkill = state.openSkill === t.dataset.name ? null : t.dataset.name;
       render(); return;
     }
-    if (act === 'tgt-add') {
-      state.searchTargets.push({ name: '體力強化', level: 3 });
-      render(); return;
-    }
-    if (act === 'tgt-del') {
-      state.searchTargets.splice(Number(t.dataset.i), 1);
-      render(); return;
-    }
-    if (act === 'do-search') {
-      state.searchBusy = true; render();
-      setTimeout(() => { runSearch(); state.searchBusy = false; render(); }, 20);
+    if (act === 'auto-build') {
+      if (state.searchBusy) return;
+      state.searchBusy = true; state.searchInfo = '搜尋中…'; render();
+      setTimeout(() => {
+        runSearch();
+        state.searchBusy = false;
+        render();
+        const el = document.querySelector('[data-page="build"] .step:nth-of-type(3)');
+        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }, 20);
       return;
     }
-    if (act === 'apply-result') {
-      const r = state.searchResults[Number(t.dataset.i)];
-      if (r) {
-        state.armor = { ...r.armor };
-        state.tab = 'build';
-        render();
-        window.scrollTo(0, 0);
-      }
+    if (act === 'alt') { applyAlt(Number(t.dataset.i)); render(); return; }
+    if (act === 'toggle-subs') {
+      const i = Number(t.dataset.i);
+      state.showSubs[i] = !state.showSubs[i];
+      render();
       return;
     }
     if (act === 'save-now') {
       const name = (state.saveName || '').trim() || ('配裝 ' + (state.saves.length + 1));
       const tot = compute();
-      const summary = [
-        (WEP_BY[state.weapon] || {}).name,
-        ...PARTS.map((p) => (ARMOR_BY[state.armor[p]] || {}).name),
-      ].filter(Boolean).join('／');
+      const summary = [(WEP_BY[state.weapon] || {}).name, ...PARTS.map((p) => (ARMOR_BY[state.armor[p]] || {}).name)].filter(Boolean).join('／');
       state.saves.unshift({ id: Date.now().toString(36), name, at: new Date().toISOString(), summary, build: snapshot() });
-      persistSaves();
-      state.saveName = '';
-      render();
-      return;
+      persistSaves(); state.saveName = ''; render(); return;
     }
-    if (act === 'load-save') {
-      applySnap(state.saves[Number(t.dataset.i)].build);
-      state.tab = 'build';
-      render();
-      return;
-    }
-    if (act === 'del-save') {
-      state.saves.splice(Number(t.dataset.i), 1);
-      persistSaves();
-      render();
-      return;
-    }
+    if (act === 'load-save') { applySnap(state.saves[Number(t.dataset.i)].build); state.tab = 'build'; render(); return; }
+    if (act === 'del-save') { state.saves.splice(Number(t.dataset.i), 1); persistSaves(); render(); return; }
     if (act === 'cmp') {
       const s = state.saves[Number(t.dataset.i)];
       if (!state.compare[0] || (state.compare[0] && state.compare[1])) state.compare = [s, null];
       else state.compare[1] = s;
-      render();
-      return;
+      render(); return;
     }
     if (act === 'export') {
-      const blob = new Blob([JSON.stringify({ app: 'mho-planner', version: 1, saves: state.saves }, null, 2)], { type: 'application/json' });
+      const blob = new Blob([JSON.stringify({ app: 'mho-planner', version: 2, saves: state.saves }, null, 2)], { type: 'application/json' });
       const a = document.createElement('a');
-      a.href = URL.createObjectURL(blob);
-      a.download = 'mho-planner-backup.json';
-      a.click();
-      URL.revokeObjectURL(a.href);
-      return;
+      a.href = URL.createObjectURL(blob); a.download = 'mho-planner-backup.json'; a.click();
+      URL.revokeObjectURL(a.href); return;
     }
-    if (act === 'import') {
-      document.querySelector('[data-act="import-file"]').click();
-      return;
-    }
+    if (act === 'import') { document.querySelector('[data-act="import-file"]').click(); return; }
   }
 
   function onChange(e) {
     const t = e.target.closest('[data-act]');
     if (!t) return;
     const act = t.dataset.act;
-    if (act === 'pq') { state.picker.q = t.value; const pos = t.selectionStart; render(); const n = document.querySelector('.search'); if (n) { n.focus(); n.setSelectionRange(pos, pos); } return; }
     if (act === 'p-skill') { state.picker.skillF = t.value; render(); return; }
     if (act === 'adventurer') { state.adventurerId = t.value; state.insights = []; render(); return; }
     if (act === 'budget') { state.insightBudget = Math.max(0, Number(t.value) || 0); render(); return; }
-    if (act === 'tgt-skill') { state.searchTargets[Number(t.dataset.i)].name = t.value; return; }
-    if (act === 'tgt-lv') { state.searchTargets[Number(t.dataset.i)].level = Number(t.value) || 1; return; }
     if (act === 'save-name') { state.saveName = t.value; return; }
+    if (act === 'substat') {
+      const i = Number(t.dataset.i);
+      if (!state.visSubs[i]) state.visSubs[i] = {};
+      state.visSubs[i][t.dataset.key] = t.value;
+      // rerender combat only would be nicer; full render loses focus — debounce later in input
+      return;
+    }
     if (act === 'import-file') {
       const f = t.files && t.files[0];
       if (!f) return;
@@ -763,9 +1047,7 @@
           const data = JSON.parse(reader.result);
           const arr = Array.isArray(data) ? data : data.saves;
           if (!Array.isArray(arr)) throw new Error('格式不對');
-          state.saves = arr.concat(state.saves);
-          persistSaves();
-          render();
+          state.saves = arr.concat(state.saves); persistSaves(); render();
         } catch (err) { alert('匯入失敗：' + err.message); }
       };
       reader.readAsText(f);
@@ -778,7 +1060,6 @@
     const t = e.target.closest('[data-act]');
     if (!t) return;
     if (t.dataset.act === 'pq') {
-      // debounce rebuild of list only
       state.picker.q = t.value;
       clearTimeout(onChange._t);
       onChange._t = setTimeout(() => {
@@ -788,42 +1069,38 @@
         if (n) { n.focus(); n.setSelectionRange(pos, pos); }
       }, 80);
     }
+    if (t.dataset.act === 'substat') {
+      const i = Number(t.dataset.i);
+      if (!state.visSubs[i]) state.visSubs[i] = {};
+      state.visSubs[i][t.dataset.key] = t.value;
+    }
+    if (t.dataset.act === 'budget') state.insightBudget = Math.max(0, Number(t.value) || 0);
+    if (t.dataset.act === 'save-name') state.saveName = t.value;
+  });
+  document.addEventListener('focusout', (e) => {
+    const t = e.target && e.target.closest && e.target.closest('[data-act="substat"]');
+    if (t) render();
   });
 
-  function applyDemo() {
-    const findA = (name) => (D.armor.find((a) => a.name === name) || {}).id;
-    const findW = (name) => (D.weapons.find((w) => w.name === name) || {}).slug;
+  function findW(name) { return (D.weapons.find((w) => w.name === name) || {}).slug; }
+
+  // Optional demo hook used for verification: ?demo=fire7hb2
+  function maybeDemo() {
+    const q = new URLSearchParams(location.search);
+    if (q.get('demo') !== 'fire7hb2') return false;
     state.weaponType = '太刀';
     state.weapon = findW('融光・飛龍刀【朱】') || findW('飛龍刀【朱】');
-    state.armor = {
-      頭部: findA('火龍心頭盔'),
-      胸部: findA('火龍鎧甲'),
-      腕部: findA('融光・火龍腕甲'),
-      腰部: findA('蠻顎龍腰甲'),
-      腿部: findA('巨蜂護腿'),
-    };
-    // demo visages: fire set + core, within cost 12, clearly real data
-    const fireVis = D.visages.filter((v) => (v.sets || []).includes('影繪之灼焰'));
-    state.visages = [];
-    if (fireVis[0]) state.visages.push({ id: fireVis[0].id, core: true });
-    if (fireVis[1]) state.visages.push({ id: fireVis[1].id, core: false });
+    state.searchTargets = [
+      { name: '火屬性傷害提升', level: 7 },
+      { name: '體力強化', level: 2 },
+    ];
     state.adventurerId = '2';
-    const adv = ADV_BY['2'];
-    // pick cheap official insights that fit budget 30: 戰意 10 + 護體 5 if present
     state.insightBudget = 30;
-    state.insights = [];
-    if (adv) {
-      const prefer = ['戰意', '護體', '蓄勢'];
-      let used = 0;
-      for (const name of prefer) {
-        const it = adv.insights.find((x) => x.name === name);
-        if (it && used + it.points <= 30) { state.insights.push(it.key); used += it.points; }
-      }
-    }
+    runSearch();
+    return true;
   }
 
-  applyDemo();
+  maybeDemo();
   render();
+  try { if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js'); } catch (e) {}
 })();
-
-try { if ("serviceWorker" in navigator) navigator.serviceWorker.register("./sw.js"); } catch (e) {}
