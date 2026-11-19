@@ -403,7 +403,6 @@
   function renderBuild() {
     const tot = compute();
     const w = tot.weapon;
-    const adv = ADV_BY[state.adventurerId];
     return `
       <div class="page" data-page="build">
         <div class="step">
@@ -443,7 +442,7 @@
         </div>
 
         <div class="step">
-          <div class="sec-h"><span class="step-n">3</span>裝備、繪影與心得 <span class="sub">防禦合計 ${tot.defense || '—'}</span></div>
+          <div class="sec-h"><span class="step-n">3</span>自動配裝與裝備 <span class="sub">防禦合計 ${tot.defense || '—'}</span></div>
           <div class="btn-row">
             <button class="btn" data-act="auto-build">${state.searchBusy ? '搜尋中…' : '自動配裝'}</button>
           </div>
@@ -468,59 +467,16 @@
             </button>`;
           }).join('')}
 
-          <div class="sec-h" style="margin-top:12px">繪影 <span class="sub costbar${tot.visCost > VISAGE_CAP ? ' over' : ''}">消耗 ${tot.visCost}/${VISAGE_CAP}</span></div>
-          ${state.visages.map((slot, i) => {
-            const v = VIS_BY[slot.id];
-            if (!v) return '';
-            const sub = state.visSubs[i] || {};
-            const field = (key, label) => `<label>${label}<input type="number" step="any" data-act="substat" data-i="${i}" data-key="${key}" value="${sub[key] == null ? '' : escape(sub[key])}"></label>`;
-            return `<div class="card">
-              <button class="slot" style="margin:0;border:0;background:transparent;padding:0" data-act="pick" data-kind="visage" data-index="${i}">
-                <span class="part">${slot.core ? '核' : '影'}</span>
-                <span class="meta">
-                  <div class="name">${escape(v.name)}</div>
-                  <div class="tags">消耗 ${v.cost}　${(v.sets || []).join('、')}${slot.core && v.main ? '　核心效果已發動' : '　點此更換'}</div>
-                </span>
-              </button>
-              <button class="btn ghost" style="margin-top:8px;width:100%" data-act="toggle-subs" data-i="${i}">${state.showSubs[i] ? '收合副屬性' : '填寫副屬性（自填才列入合計）'}</button>
-              ${state.showSubs[i] ? `<div class="muted" style="margin-top:6px">隨機副屬性沒有公開固定值，這裡只加你輸入的數字。</div>
-              <div class="substat">
-                ${field('attack', '攻擊力')}
-                ${field('affinity', '會心率％')}
-                ${field('defense', '防禦力')}
-                ${field('hp', '體力')}
-                ${field('elemAtk_火', '火屬性攻擊')}
-                ${field('elemPct_火', '火傷害％')}
-                ${field('elemAtk_水', '水屬性攻擊')}
-                ${field('elemPct_水', '水傷害％')}
-                ${field('elemAtk_雷', '雷屬性攻擊')}
-                ${field('elemPct_雷', '雷傷害％')}
-                ${field('elemAtk_冰', '冰屬性攻擊')}
-                ${field('elemPct_冰', '冰傷害％')}
-                ${field('elemAtk_龍', '龍屬性攻擊')}
-                ${field('elemPct_龍', '龍傷害％')}
-                ${field('physPct', '物理傷害％')}
-              </div>` : ''}
-            </div>`;
-          }).join('')}
-          <div class="btn-row"><button class="btn ghost" data-act="add-visage">新增繪影</button></div>
-          <div class="note">同一冒險者裝備的繪影消耗合計不能超過 ${VISAGE_CAP}。核心效果只有放在核心欄位才會發動。</div>
-
-          <div class="sec-h" style="margin-top:12px">心得 <span class="sub costbar${tot.insightUsed > (state.insightBudget || 0) ? ' over' : ''}">成本 ${tot.insightUsed}/${state.insightBudget || 0}</span></div>
-          <div class="target">
-            <select data-act="adventurer">${D.adventurers.map((a) =>
-              `<option value="${escape(a.id)}" ${a.id === state.adventurerId ? 'selected' : ''}>${escape(a.name)}</option>`
-            ).join('')}</select>
-            <input type="number" min="0" step="1" value="${state.insightBudget}" data-act="budget" style="width:88px" title="目前心得點數">
-            <span class="muted">目前點數</span>
-          </div>
-          <button class="slot" data-act="pick" data-kind="insight">
-            <span class="part">心</span>
-            <span class="meta">
-              <div class="name${tot.insightFx.length ? '' : ' empty'}">${tot.insightFx.length ? tot.insightFx.map((x) => x.title).join('、') : '點此選擇心得'}</div>
-              <div class="tags">${adv ? escape(adv.name) : ''}　點數由你轉換的心得道具決定，沒有固定上限</div>
-            </span>
-          </button>
+          ${tot.skills.length ? `
+          <div class="sec-h" style="margin-top:14px">這套裝備的全部技能 <span class="sub">共 ${tot.skills.length} 項（武器、防具與套裝）</span></div>
+          <div class="gear-skills">${tot.skills.map((sk) =>
+            `<div class="gear-skill${sk.over ? ' over' : ''}">
+              ${icon(sk.cat)}
+              <span class="skill-name">${escape(sk.name)}</span>
+              ${pips(sk)}
+              ${lvText(sk)}
+            </div>`
+          ).join('')}</div>` : ((state.altResults.length || PARTS.some((p) => state.armor[p])) ? '<div class="empty-hint">這套裝備還沒有技能。</div>' : '')}
         </div>
 
         <div class="section">
@@ -541,15 +497,6 @@
               <div class="d">${escape(s.effect || '')}${s.flavor ? '　' + escape(s.flavor) : ''}</div>
             </div>`
           ).join('') : '<div class="empty-hint">尚未湊成套裝。未達件數的進度也會列在這裡。</div>'}</div>
-        </div>
-
-        <div class="section">
-          <div class="sec-h">繪影與心得效果</div>
-          <div class="fx-list">
-            ${[...tot.visFx, ...tot.insightFx].length ? [...tot.visFx, ...tot.insightFx].map((f) =>
-              `<div class="fx-item"><div class="t" style="font-weight:700;color:var(--gold2)">${escape(f.title)}${f.points ? '　成本 ' + f.points : ''}</div><div class="d">${escape(f.text)}</div></div>`
-            ).join('') : '<div class="empty-hint">尚未裝備繪影或心得。套裝與心得效果會全部列在這裡。</div>'}
-          </div>
         </div>
         <div class="note">資料來源：${escape(D.source)}，技能為防具最高稀有度時的等級。資料抓取日期 ${escape(D.fetchedAt)}（台北時間）。</div>
       </div>`;
@@ -907,8 +854,10 @@
     if (!r) return;
     state.altIndex = i;
     state.armor = { ...r.armor };
-    fillVisagesFor(state.searchTargets);
-    fillInsights();
+    state.visages = [];
+    state.visSubs = {};
+    state.showSubs = {};
+    state.insights = [];
   }
 
   /* ---------- events ---------- */

@@ -301,3 +301,25 @@ input, select { font: inherit; color: inherit; }
 
 .goal-top { flex-wrap: nowrap; }
 .goal-top .skill-name { flex: 1; min-width: 0; }
+
+/* always-visible skill list under auto-equip results */
+.gear-skills {
+  background: linear-gradient(180deg, #1c1924, #15131c);
+  border: 1px solid #3a3546;
+  border-radius: 14px;
+  overflow: hidden;
+  box-shadow: var(--shadow);
+  margin-top: 8px;
+}
+.gear-skill {
+  display: grid;
+  grid-template-columns: 22px 1fr auto auto;
+  gap: 8px;
+  align-items: center;
+  width: 100%;
+  padding: 9px 10px;
+  border-bottom: 1px solid #2a2733;
+}
+.gear-skill:nth-child(even) { background: rgba(255,255,255,.02); }
+.gear-skill:last-child { border-bottom: 0; }
+.gear-skill.over .skill-name { color: var(--red); }
