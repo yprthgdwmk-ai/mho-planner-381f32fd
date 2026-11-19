@@ -1,0 +1,9 @@
+{
+  "name": "旅人配裝器",
+  "short_name": "配裝器",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#0b0a10",
+  "theme_color": "#0b0a10",
+  "lang": "zh-Hant"
+}
