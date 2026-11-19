@@ -51,7 +51,8 @@
 
   const state = {
     tab: 'build',
-    weaponType: '太刀',
+    weaponType: '',
+    confirmOpen: false,
     weapon: null,
     armor: { 頭部: null, 胸部: null, 腕部: null, 腰部: null, 腿部: null },
     visages: [],
@@ -92,8 +93,8 @@
   }
   function applySnap(s) {
     if (!s) return;
-    state.weaponType = s.weaponType || '太刀';
     state.weapon = s.weapon || null;
+    state.weaponType = (s.weaponType != null && s.weaponType !== '') ? s.weaponType : ((WEP_BY[state.weapon] || {}).typeLabel || '');
     state.armor = { 頭部: null, 胸部: null, 腕部: null, 腰部: null, 腿部: null, ...(s.armor || {}) };
     state.visages = s.visages || [];
     state.visSubs = s.visSubs || {};
@@ -406,22 +407,7 @@
     return `
       <div class="page" data-page="build">
         <div class="step">
-          <div class="sec-h"><span class="step-n">1</span>選擇武器 <span class="sub">${w ? escape(w.typeLabel) : ''}</span></div>
-          <div class="weapon-types">${WEAPON_TYPES.map((t) =>
-            `<button class="chip${state.weaponType === t ? ' on' : ''}" data-act="wtype" data-type="${t}">${t}</button>`
-          ).join('')}</div>
-          <button class="slot" data-act="pick" data-kind="weapon">
-            <span class="part">武</span>
-            <span class="meta">
-              <div class="name${w ? '' : ' empty'}">${w ? escape(w.name) : '點此選擇武器'}</div>
-              <div class="tags">${w ? `攻擊 ${w.attack}　會心 ${fmt(w.critRate)}%${w.element ? '　' + w.element + ' ' + (w.elementValue || '') : ''}${w.skill ? '　' + w.skill.name + ' Lv' + w.skill.level : ''}` : '依武器種類篩選'}</div>
-            </span>
-            ${w ? `<span class="${rarityClass(w.maxRarity)}">R${w.maxRarity}</span>` : ''}
-          </button>
-        </div>
-
-        <div class="step">
-          <div class="sec-h"><span class="step-n">2</span>想要的技能</div>
+          <div class="sec-h"><span class="step-n">1</span>預定技能</div>
           ${state.searchTargets.map((t, i) => `
             <div class="goal">
               <div class="goal-top">
@@ -438,25 +424,44 @@
               ${goalStatus(tot, t)}
             </div>`).join('')}
           <button class="btn ghost" data-act="pick" data-kind="skill">＋ 新增技能</button>
-          ${state.searchTargets.length ? '' : '<div class="empty-hint">先選要湊的技能和目標等級，再去第 3 步按自動配裝。</div>'}
+          ${state.searchTargets.length ? '' : '<div class="empty-hint">先選要湊的技能和目標等級，再按「自動找配裝」。不必先選武器。</div>'}
+
+          <div class="sec-h" style="margin-top:14px">武器種類（可不選）</div>
+          <div class="weapon-types">
+            <button class="chip${state.weaponType === '' ? ' on' : ''}" data-act="wtype" data-type="">不限</button>
+            ${WEAPON_TYPES.map((t) =>
+              `<button class="chip${state.weaponType === t ? ' on' : ''}" data-act="wtype" data-type="${t}">${t}</button>`
+            ).join('')}
+          </div>
+          <div class="muted" style="margin:4px 0 8px">預設不限種類，搜尋時會一併挑選武器與五件防具。也可事後再改武器。</div>
+          <div class="btn-row">
+            <button class="btn" data-act="auto-build">${state.searchBusy ? '搜尋中…' : '自動找配裝'}</button>
+          </div>
         </div>
 
-        <div class="step">
-          <div class="sec-h"><span class="step-n">3</span>自動配裝與裝備 <span class="sub">防禦合計 ${tot.defense || '—'}</span></div>
-          <div class="btn-row">
-            <button class="btn" data-act="auto-build">${state.searchBusy ? '搜尋中…' : '自動配裝'}</button>
-          </div>
+        <div class="step" data-step="results">
+          <div class="sec-h"><span class="step-n">2</span>配裝結果 <span class="sub">防禦合計 ${tot.defense || '—'}</span></div>
           ${state.searchInfo ? `<div class="muted" style="margin:6px 0">${escape(state.searchInfo)}</div>` : ''}
           ${state.altResults.length ? `<div class="alts">${state.altResults.map((r, i) => `
             <button class="alt${state.altIndex === i ? ' on' : ''}" data-act="alt" data-i="${i}">
               <b>方案 ${i + 1}${r.shortfall ? '' : ' ✓'}</b>
-              ${r.labels.join('　')}${r.shortfall ? `<div class="err">還差 ${r.shortfall} 點</div>` : ''}
+              ${r.labels.join('　')}${r.weaponName ? `<div class="muted">${escape(r.weaponName)}</div>` : ''}
+              ${r.shortfall ? `<div class="err">還差 ${r.shortfall} 點</div>` : ''}
               ${r.waste ? `<div class="err">溢出 ${r.waste}</div>` : ''}
-            </button>`).join('')}</div>` : ''}
+            </button>`).join('')}</div>` : (!state.searchInfo ? '<div class="empty-hint">選好預定技能後按「自動找配裝」，確認後就會開始搜尋。</div>' : '')}
+
+          <button class="slot" data-act="pick" data-kind="weapon">
+            <span class="part">武</span>
+            <span class="meta">
+              <div class="name${w ? '' : ' empty'}">${w ? escape(w.name) : '尚未選擇武器'}</div>
+              <div class="tags">${w ? `${escape(w.typeLabel)}　攻擊 ${w.attack}　會心 ${fmt(w.critRate)}%${w.element ? '　' + w.element + ' ' + (w.elementValue || '') : ''}${w.skill ? '　' + w.skill.name + ' Lv' + w.skill.level : ''}` : '可由自動找配裝帶入，或點此自選'}</div>
+            </span>
+            ${w ? `<span class="${rarityClass(w.maxRarity)}">R${w.maxRarity}</span>` : ''}
+          </button>
 
           ${PARTS.map((p) => {
             const a = state.armor[p] && ARMOR_BY[state.armor[p]];
-            const tags = a ? a.skills.map((s) => `${s.name} Lv${s.level}`).join('　') + (a.setSkill ? '　套裝：' + a.setSkill : '') : '點此選擇或先按自動配裝';
+            const tags = a ? a.skills.map((s) => `${s.name} Lv${s.level}`).join('　') + (a.setSkill ? '　套裝：' + a.setSkill : '') : '點此選擇或先按自動找配裝';
             return `<button class="slot" data-act="pick" data-kind="armor" data-part="${p}">
               <span class="part">${PART_SHORT[p]}</span>
               <span class="meta">
@@ -467,7 +472,7 @@
             </button>`;
           }).join('')}
 
-          ${tot.skills.length ? `
+                    ${tot.skills.length ? `
           <div class="sec-h" style="margin-top:14px">這套裝備的全部技能 <span class="sub">共 ${tot.skills.length} 項（武器、防具與套裝）</span></div>
           <div class="gear-skills">${tot.skills.map((sk) =>
             `<div class="gear-skill${sk.over ? ' over' : ''}">
@@ -567,10 +572,16 @@
     if (p.kind === 'weapon') {
       title = '選擇武器';
       const q = (p.q || '').trim();
-      let list = D.weapons.filter((w) => w.typeLabel === state.weaponType);
-      if (q) list = list.filter((w) => (w.name + (w.element || '') + (w.skill ? w.skill.name : '')).includes(q));
+      let list = state.weaponType ? D.weapons.filter((w) => w.typeLabel === state.weaponType) : D.weapons.slice();
+      if (q) list = list.filter((w) => (w.name + (w.element || '') + (w.typeLabel || '') + (w.skill ? w.skill.name : '')).includes(q));
       body = `
         <input class="search" placeholder="搜尋武器、屬性、技能" data-act="pq" value="${escape(p.q || '')}">
+        <div class="filters">
+          <button class="chip${state.weaponType === '' ? ' on' : ''}" data-act="wtype" data-type="">不限</button>
+          ${WEAPON_TYPES.map((t) =>
+            `<button class="chip${state.weaponType === t ? ' on' : ''}" data-act="wtype" data-type="${t}">${t}</button>`
+          ).join('')}
+        </div>
         <div class="list">
           <button class="pick" data-act="choose-weapon" data-slug=""><div class="nm">（不裝備）</div></button>
           ${list.map((w) => `<button class="pick${state.weapon === w.slug ? ' on' : ''}" data-act="choose-weapon" data-slug="${escape(w.slug)}">
@@ -657,7 +668,27 @@
         </nav>
       </header>
       ${state.tab === 'saves' ? renderSaves() : renderBuild()}
-      ${renderPicker()}`;
+      ${renderPicker()}
+      ${renderConfirm()}`;
+  }
+
+  function renderConfirm() {
+    if (!state.confirmOpen) return '';
+    const targets = state.searchTargets.filter((t) => t.name && t.level > 0);
+    return `<div class="overlay" data-act="confirm-cancel"><div class="sheet confirm-sheet" data-act="sheet">
+      <div class="sheet-h"><b>確認預定技能</b><button class="x" data-act="confirm-cancel">×</button></div>
+      <p class="confirm-note">即將依下列技能自動尋找武器與五件防具（不含繪影、心得）。請確認後按「確定」開始搜尋。</p>
+      <div class="confirm-list">${targets.length ? targets.map((t) => `
+        <div class="confirm-row">
+          <span>${icon(catOf(t.name))}${escape(t.name)}</span>
+          <b>Lv${t.level}</b>
+        </div>`).join('') : '<div class="empty-hint">尚未選擇技能。</div>'}</div>
+      <div class="confirm-note">武器種類：${state.weaponType ? escape(state.weaponType) : '不限'}</div>
+      <div class="btn-row confirm-actions">
+        <button class="btn ghost" data-act="confirm-cancel">取消</button>
+        <button class="btn" data-act="confirm-ok">確定</button>
+      </div>
+    </div></div>`;
   }
 
   /* ---------- auto search ---------- */
@@ -723,11 +754,67 @@
     }
   }
 
+  function wantedElement(targets) {
+    for (const t of targets) {
+      const m = t.name.match(/^(火|水|雷|冰|龍)屬性/);
+      if (m) return m[1];
+    }
+    return null;
+  }
+  function filteredWeapons() {
+    return state.weaponType ? D.weapons.filter((w) => w.typeLabel === state.weaponType) : D.weapons.slice();
+  }
+  function scoreWeapon(w, wantNames, elem) {
+    let s = 0;
+    if (w.skill && wantNames.has(w.skill.name)) s += (w.skill.level || 0) * 10000;
+    if (elem && w.element === elem) s += 5000 + (w.elementValue || 0);
+    s += (w.attack || 0);
+    s += (w.critRate || 0);
+    return s;
+  }
+  function weaponPacksFor(targets, wantNames) {
+    const elem = wantedElement(targets);
+    const all = filteredWeapons();
+    const nT = targets.length;
+    function packW(w) {
+      const v = new Array(nT).fill(0);
+      if (w && w.skill) {
+        for (let i = 0; i < nT; i++) if (w.skill.name === targets[i].name) v[i] += w.skill.level || 0;
+      }
+      return {
+        v, slug: w ? w.slug : null, name: w ? w.name : '', atk: (w && w.attack) || 0,
+        typeLabel: (w && w.typeLabel) || '', elem: w && w.element, ev: (w && w.elementValue) || 0,
+        score: w ? scoreWeapon(w, wantNames, elem) : -1,
+      };
+    }
+    const packs = [];
+    const contrib = all.filter((w) => w.skill && wantNames.has(w.skill.name));
+    const others = all.filter((w) => !(w.skill && wantNames.has(w.skill.name)));
+    if (others.length) {
+      others.sort((a, b) => scoreWeapon(b, wantNames, elem) - scoreWeapon(a, wantNames, elem));
+      packs.push(packW(others[0]));
+    }
+    const bestByKey = new Map();
+    for (const w of contrib) {
+      const key = w.skill.name + ':' + (w.skill.level || 0);
+      const p = packW(w);
+      const prev = bestByKey.get(key);
+      if (!prev || p.score > prev.score) bestByKey.set(key, p);
+    }
+    for (const p of bestByKey.values()) packs.push(p);
+    if (!packs.length && all.length) {
+      all.sort((a, b) => scoreWeapon(b, wantNames, elem) - scoreWeapon(a, wantNames, elem));
+      packs.push(packW(all[0]));
+    }
+    if (!packs.length) packs.push(packW(null));
+    return packs;
+  }
+
   function runSearch() {
     const targets = state.searchTargets.filter((t) => t.name && t.level > 0);
     if (!targets.length) {
       state.altResults = [];
-      state.searchInfo = '請先在第 2 步選技能。';
+      state.searchInfo = '請先選擇預定技能。';
       return;
     }
     const wantNames = new Set(targets.map((t) => t.name));
@@ -794,6 +881,9 @@
     let visited = 0, timedOut = false;
     const path = new Array(5);
 
+    const wepPacks = weaponPacksFor(targets, wantNames);
+    let activeWep = wepPacks[0] || { v: new Array(nT).fill(0), slug: null, name: '', atk: 0, score: 0 };
+
     function consider(cur, setCnt, def, empty) {
       const tot = cur.slice();
       const sets = [];
@@ -809,8 +899,10 @@
       }
       const rec = {
         armor: {},
+        weapon: activeWep.slug,
+        weaponName: activeWep.name,
         shortfall, waste, defense: def, empty, sets, labels,
-        score: shortfall * 10000 + waste * 100 - def + empty * 3,
+        score: shortfall * 10000 + waste * 100 - def + empty * 3 - (activeWep.atk || 0) * 0.01,
       };
       PARTS.forEach((p, i) => { rec.armor[p] = path[i] && path[i].id; });
       if (best.length < 8) { best.push(rec); best.sort((a, b) => a.score - b.score); }
@@ -840,12 +932,17 @@
       }
     }
 
-    dfs(0, new Array(nT).fill(0), {}, 0, 0);
+    for (const wp of wepPacks) {
+      if (timedOut) break;
+      activeWep = wp;
+      dfs(0, wp.v.slice(), {}, 0, 0);
+    }
     state.altResults = best;
     const meet = best.filter((r) => r.shortfall === 0).length;
+    const typeNote = state.weaponType ? `武器限「${state.weaponType}」。` : '武器種類不限，已一併挑選。';
     state.searchInfo = meet
-      ? `找到 ${meet} 套能達成目標的組合（顯示前 ${best.length} 套）${timedOut ? '，搜尋時間到後停止，已保留當下最佳。' : '。只搜尋對目標技能有貢獻的防具，並用分支界限剪掉不可能的組合。'}`
-      : (best.length ? `沒有完全達標的組合，已列出最接近的 ${best.length} 套。` : '找不到可用組合。');
+      ? `找到 ${meet} 套能達成目標的組合（顯示前 ${best.length} 套）。${typeNote}${timedOut ? '搜尋時間到後停止，已保留當下最佳。' : '只搜尋對目標技能有貢獻的防具，並用分支界限剪掉不可能的組合。'}`
+      : (best.length ? `沒有完全達標的組合，已列出最接近的 ${best.length} 套。${typeNote}` : '找不到可用組合。');
     if (best.length) applyAlt(0);
   }
 
@@ -854,6 +951,7 @@
     if (!r) return;
     state.altIndex = i;
     state.armor = { ...r.armor };
+    if (r.weapon !== undefined) state.weapon = r.weapon;
     state.visages = [];
     state.visSubs = {};
     state.showSubs = {};
@@ -872,7 +970,7 @@
     const act = t.dataset.act;
     if (act === 'sheet') { e.stopPropagation(); return; }
     if (act === 'tab') { state.tab = t.dataset.tab; state.picker = null; render(); return; }
-    if (act === 'wtype') { state.weaponType = t.dataset.type; render(); return; }
+    if (act === 'wtype') { state.weaponType = t.dataset.type || ''; render(); return; }
     if (act === 'pick') {
       state.picker = { kind: t.dataset.kind, part: t.dataset.part, index: t.dataset.index != null ? Number(t.dataset.index) : null, q: '', skillF: '' };
       render();
@@ -931,12 +1029,29 @@
     }
     if (act === 'auto-build') {
       if (state.searchBusy) return;
+      if (!state.searchTargets.filter((x) => x.name && x.level > 0).length) {
+        state.searchInfo = '請先選擇預定技能。';
+        render();
+        return;
+      }
+      state.confirmOpen = true;
+      render();
+      return;
+    }
+    if (act === 'confirm-cancel') {
+      state.confirmOpen = false;
+      render();
+      return;
+    }
+    if (act === 'confirm-ok') {
+      if (state.searchBusy) return;
+      state.confirmOpen = false;
       state.searchBusy = true; state.searchInfo = '搜尋中…'; render();
       setTimeout(() => {
         runSearch();
         state.searchBusy = false;
         render();
-        const el = document.querySelector('[data-page="build"] .step:nth-of-type(3)');
+        const el = document.querySelector('[data-step="results"]');
         if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
       }, 20);
       return;
@@ -1037,14 +1152,18 @@
   function maybeDemo() {
     const q = new URLSearchParams(location.search);
     if (q.get('demo') !== 'fire7hb2') return false;
-    state.weaponType = '太刀';
-    state.weapon = findW('融光・飛龍刀【朱】') || findW('飛龍刀【朱】');
+    state.weaponType = '';
+    state.weapon = null;
     state.searchTargets = [
       { name: '火屬性傷害提升', level: 7 },
       { name: '體力強化', level: 2 },
     ];
     state.adventurerId = '2';
     state.insightBudget = 30;
+    if (q.get('confirm') === '1') {
+      state.confirmOpen = true;
+      return true;
+    }
     runSearch();
     return true;
   }
