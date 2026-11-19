@@ -461,14 +461,16 @@
       <div class="page" data-page="build">
         <div class="step">
           <div class="sec-h"><span class="step-n">1</span>預定技能</div>
-          ${state.searchTargets.map((t, i) => {
+          <div class="sel-box">
+            <div class="sel-box-h">已選技能</div>
+            ${state.searchTargets.length ? state.searchTargets.map((t, i) => {
             const desc = skillDesc(t.name);
             const lvFx = skillLevelText(t.name, t.level);
             const miss = !desc && !lvFx;
             const atk = isAtkMain(t.name);
             const lvLabel = atk ? ('Lv最高 ' + t.level) : ('Lv' + t.level);
-            return `<div class="goal sel-skill">
-              <div class="goal-top">
+            return `<div class="sel-box-item">
+              <div class="sel-box-row">
                 ${icon(catOf(t.name))}
                 <span class="skill-name">${escape(t.name)}</span>
                 <span class="sel-lvchip">${lvLabel}</span>
@@ -477,7 +479,7 @@
                   <span style="min-width:1.6em;text-align:center;font-weight:700">${t.level}</span>
                   <button type="button" data-act="tgt-inc" data-i="${i}">+</button>
                 </div>`}
-                <button type="button" class="clear-btn" data-act="tgt-del" data-i="${i}">刪</button>
+                <button type="button" class="sel-box-x" data-act="tgt-del" data-i="${i}" aria-label="移除 ${escape(t.name)}">×</button>
               </div>
               <div style="margin:4px 0 0 30px">${targetPips(t.name, t.level)}</div>
               ${desc ? `<div class="sel-desc">${escape(desc)}</div>` : ''}
@@ -485,7 +487,8 @@
               ${miss ? `<div class="sel-desc">此技能的詳細效果文案尚未收入公開資料。</div>` : ''}
               ${goalStatus(tot, t)}
             </div>`;
-          }).join('')}
+          }).join('') : '<div class="sel-box-empty">尚未選擇技能</div>'}
+          </div>
           <button class="btn ghost" data-act="pick" data-kind="skill">＋ 新增技能</button>
           ${state.searchTargets.length ? '' : '<div class="empty-hint">先選要湊的技能和目標等級，再按「自動找配裝」。不必先選武器。</div>'}
 
@@ -1304,11 +1307,16 @@
   function maybeDemo() {
     const q = new URLSearchParams(location.search);
     const demo = q.get('demo');
-    if (demo !== 'fire7hb2' && demo !== 'atkmain') return false;
+    if (demo !== 'fire7hb2' && demo !== 'atkmain' && demo !== 'sel2') return false;
     state.weaponType = '';
     state.weapon = null;
     if (demo === 'atkmain') {
       state.searchTargets = [{ name: '氣力轉化', level: 7 }];
+    } else if (demo === 'sel2') {
+      state.searchTargets = [
+        { name: '氣力轉化', level: 7 },
+        { name: '體力強化', level: 2 },
+      ];
     } else {
       state.searchTargets = [
         { name: '火屬性傷害提升', level: 7 },
@@ -1321,7 +1329,7 @@
       state.picker = { kind: 'skill', q: q.get('q') || '', skillF: '', open: q.get('open') || null };
       return true;
     }
-    if (q.get('idle') === '1' || demo === 'atkmain') return true;
+    if (q.get('idle') === '1' || demo === 'atkmain' || demo === 'sel2') return true;
     if (q.get('confirm') === '1') {
       state.confirmOpen = true;
       return true;

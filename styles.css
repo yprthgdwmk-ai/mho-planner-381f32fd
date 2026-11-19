@@ -372,3 +372,38 @@ input, select { font: inherit; color: inherit; }
 }
 .sel-desc, .sel-lvfx { font-size: 12.5px; line-height: 1.55; margin: 6px 0 2px 30px; color: var(--muted); }
 .sel-lvfx { color: var(--gold2); }
+
+/* selected-skills box */
+.sel-box {
+  border: 1.5px solid var(--gold);
+  border-radius: 12px;
+  background: #14121b;
+  margin: 0 0 12px;
+  overflow: hidden;
+  box-shadow: 0 0 0 1px rgba(212,165,74,.18);
+}
+.sel-box-h {
+  font-size: 12px; letter-spacing: .14em; font-weight: 700;
+  color: var(--gold); padding: 8px 12px 6px;
+  border-bottom: 1px solid rgba(212,165,74,.35);
+  background: #1c1910;
+}
+.sel-box-empty {
+  padding: 18px 12px; color: var(--muted);
+  font-size: 13.5px; text-align: center;
+}
+.sel-box-item {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--line);
+}
+.sel-box-item:last-child { border-bottom: 0; }
+.sel-box-row {
+  display: flex; align-items: center; gap: 8px;
+}
+.sel-box-row .skill-name { flex: 1; min-width: 0; font-weight: 700; font-size: 14px; }
+.sel-box-x {
+  flex: none; width: 28px; height: 28px; border-radius: 8px;
+  color: var(--muted); font-size: 20px; line-height: 1;
+  font-weight: 500;
+}
+.sel-box-x:active { color: var(--red); background: #2a1514; }
